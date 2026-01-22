@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.Python
+
+# Virtual Environment
+venv/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints
+
+# Data files (don't commit large datasets)
+data/raw/*.csv
+data/raw/*.parquet
+data/processed/*.csv
+data/processed/*.parquet
+*.h5
+*.hdf5
+
+# Model checkpoints
+outputs/models/*.zip
+outputs/models/*.pt
+outputs/models/*.pth
+*.pkl
+
+# Logs
+logs/*.log
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Don't ignore .gitkeep files!
+!.gitkeep
