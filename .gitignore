@@ -1,43 +1,262 @@
+# =============================================================================
+# .gitignore for Portfolio RL Project
+# =============================================================================
+# This file tells Git which files and folders to ignore.
+# These files won't be tracked or uploaded to your GitLab repository.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
 # Python
+# -----------------------------------------------------------------------------
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyc
-.Python
+*$py.class
 
-# Virtual Environment
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# -----------------------------------------------------------------------------
+# Virtual Environments
+# -----------------------------------------------------------------------------
+# Don't commit virtual environment folders
+# (Everyone should create their own from requirements.txt)
+
 venv/
 env/
-.venv
+ENV/
+.venv/
+.env/
+DRL/                    # Your virtual environment name
+portfolio-rl-env/
+*.env
 
-# IDE
-.vscode/
-.idea/
-*.swp
+# -----------------------------------------------------------------------------
+# Data Files
+# -----------------------------------------------------------------------------
+# Data can be re-downloaded, and may be too large for Git
 
-# Jupyter
-.ipynb_checkpoints
-
-# Data files (don't commit large datasets)
-data/raw/*.csv
-data/raw/*.parquet
-data/processed/*.csv
-data/processed/*.parquet
+data/
+*.csv
+*.parquet
+*.pkl
+*.pickle
 *.h5
 *.hdf5
 
-# Model checkpoints
-outputs/models/*.zip
-outputs/models/*.pt
-outputs/models/*.pth
-*.pkl
+# But DO track the data config (already in configs/)
+!configs/data_config.yaml
 
-# Logs
-logs/*.log
+# -----------------------------------------------------------------------------
+# Results and Outputs
+# -----------------------------------------------------------------------------
+# These are generated during experiments and can be regenerated
+
+results/
+outputs/
+checkpoints/
+
+# Model files (can be large)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+models/
+
+# Log files
+logs/
 *.log
+tensorboard_logs/
 
-# OS
+# Figures (generated during analysis)
+figures/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# But DO track figures explicitly added to docs/
+!docs/figures/
+
+# -----------------------------------------------------------------------------
+# Jupyter Notebooks
+# -----------------------------------------------------------------------------
+# Notebook checkpoints (auto-saved versions)
+.ipynb_checkpoints/
+
+# Notebook output cells can make diffs messy
+# Consider using nbstripout to clean notebooks before committing
+
+# -----------------------------------------------------------------------------
+# IDE and Editor Files
+# -----------------------------------------------------------------------------
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+
+# Spyder
+.spyderproject
+.spyproject
+
+# -----------------------------------------------------------------------------
+# Operating System Files
+# -----------------------------------------------------------------------------
+
+# macOS
 .DS_Store
-Thumbs.db
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
 
-# Don't ignore .gitkeep files!
-!.gitkeep
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+
+# -----------------------------------------------------------------------------
+# Experiment Tracking
+# -----------------------------------------------------------------------------
+
+# Weights & Biases
+wandb/
+*.wandb
+
+# MLflow
+mlruns/
+
+# -----------------------------------------------------------------------------
+# Secrets and Credentials
+# -----------------------------------------------------------------------------
+# NEVER commit API keys or passwords!
+
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.yaml
+credentials.yaml
+
+# FRED API key file (if you create one)
+fred_api_key.txt
+
+# -----------------------------------------------------------------------------
+# Miscellaneous
+# -----------------------------------------------------------------------------
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Large files that shouldn't be in Git
+*.mp4
+*.mov
+*.avi

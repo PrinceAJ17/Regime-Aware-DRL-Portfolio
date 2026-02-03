@@ -1,0 +1,270 @@
+# =============================================================================
+# Training Configuration
+# =============================================================================
+# This file defines hyperparameters for all RL algorithms.
+# These are the "knobs" you tune to improve learning performance.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# General Training Settings
+# -----------------------------------------------------------------------------
+
+general:
+  # Total environment interactions during training
+  total_timesteps: 1_000_000
+  
+  # Random seeds for reproducibility
+  # Using multiple seeds lets us measure variance in results
+  seeds: [42, 123, 456, 789, 1000]
+  
+  # Device for neural network computation
+  device: "auto"  # Options: "auto", "cpu", "cuda"
+  # "auto" will use GPU if available, otherwise CPU
+  
+  # Evaluation during training
+  evaluation:
+    frequency: 10_000  # Evaluate every N timesteps
+    episodes: 10  # Number of episodes per evaluation
+    deterministic: true  # Use deterministic policy during evaluation
+  
+  # Checkpointing
+  checkpointing:
+    save_frequency: 50_000  # Save model every N timesteps
+    save_best: true  # Also save the best model (by validation Sharpe)
+    keep_last_n: 3  # Keep only last N checkpoints to save disk space
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 100_000  # Stop if no improvement for N timesteps
+    metric: "sharpe_ratio"  # Metric to monitor
+    min_delta: 0.01  # Minimum improvement to count as progress
+  
+  # Logging
+  logging:
+    wandb:
+      enabled: true
+      project: "portfolio-rl"
+      entity: null  # Your wandb username (null = default)
+    tensorboard:
+      enabled: true
+      log_dir: "results/logs/tensorboard"
+
+# -----------------------------------------------------------------------------
+# PPO (Proximal Policy Optimization) Configuration
+# -----------------------------------------------------------------------------
+# PPO is an on-policy algorithm known for stability and ease of tuning.
+# Good default choice for many RL problems.
+
+ppo:
+  # Learning rate (how big steps to take when updating)
+  learning_rate: 0.0003  # 3e-4, common default
+  
+  # Number of steps to collect before each update
+  n_steps: 2048  # Larger = more stable but slower
+  
+  # Mini-batch size for gradient updates
+  batch_size: 64
+  
+  # Number of epochs per update (how many times to reuse collected data)
+  n_epochs: 10
+  
+  # Discount factor (how much to value future rewards)
+  gamma: 0.99  # Close to 1 = care about long-term
+  
+  # GAE lambda (bias-variance tradeoff in advantage estimation)
+  gae_lambda: 0.95
+  
+  # Clipping range for policy updates (prevents too-large updates)
+  clip_range: 0.2
+  
+  # Entropy coefficient (encourages exploration)
+  ent_coef: 0.01  # Higher = more exploration
+  
+  # Value function coefficient (relative importance of value loss)
+  vf_coef: 0.5
+  
+  # Maximum gradient norm (prevents exploding gradients)
+  max_grad_norm: 0.5
+  
+  # Neural network architecture
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]  # Policy network: 2 layers of 256 units
+      vf: [256, 256]  # Value network: 2 layers of 256 units
+    activation_fn: "relu"  # ReLU activation
+
+# -----------------------------------------------------------------------------
+# SAC (Soft Actor-Critic) Configuration
+# -----------------------------------------------------------------------------
+# SAC is an off-policy algorithm with automatic entropy tuning.
+# Often achieves better sample efficiency than PPO.
+
+sac:
+  # Learning rate
+  learning_rate: 0.0003
+  
+  # Replay buffer size (how many past experiences to store)
+  buffer_size: 1_000_000
+  
+  # How many experiences to sample for each gradient update
+  batch_size: 256
+  
+  # Discount factor
+  gamma: 0.99
+  
+  # Soft update coefficient (how fast to update target networks)
+  tau: 0.005  # Smaller = more stable but slower learning
+  
+  # Entropy coefficient
+  ent_coef: "auto"  # "auto" = learn automatically, or set a number
+  
+  # Target entropy (only used if ent_coef is "auto")
+  target_entropy: "auto"  # "auto" = -dim(action_space)
+  
+  # Training frequency (update every N steps)
+  train_freq: 1
+  
+  # Gradient steps per update
+  gradient_steps: 1
+  
+  # When to start learning (fill buffer first)
+  learning_starts: 10_000  # Collect this many steps before training
+  
+  # Neural network architecture
+  policy_kwargs:
+    net_arch: [256, 256]  # Shared architecture for actor and critic
+    activation_fn: "relu"
+
+# -----------------------------------------------------------------------------
+# TD3 (Twin Delayed DDPG) Configuration
+# -----------------------------------------------------------------------------
+# TD3 is an off-policy algorithm designed to reduce overestimation bias.
+# Good for continuous action spaces.
+
+td3:
+  # Learning rate
+  learning_rate: 0.0003
+  
+  # Replay buffer size
+  buffer_size: 1_000_000
+  
+  # Batch size
+  batch_size: 256
+  
+  # Discount factor
+  gamma: 0.99
+  
+  # Soft update coefficient
+  tau: 0.005
+  
+  # Policy update delay (update policy every N critic updates)
+  policy_delay: 2  # Key TD3 feature: delays policy updates
+  
+  # Target policy smoothing noise
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  
+  # Exploration noise
+  action_noise:
+    type: "normal"  # Options: "normal", "ornstein_uhlenbeck"
+    sigma: 0.1  # Standard deviation
+  
+  # Training frequency
+  train_freq: 1
+  gradient_steps: 1
+  
+  # Learning starts
+  learning_starts: 10_000
+  
+  # Neural network architecture
+  policy_kwargs:
+    net_arch: [256, 256]
+    activation_fn: "relu"
+
+# -----------------------------------------------------------------------------
+# Rainbow DQN Configuration
+# -----------------------------------------------------------------------------
+# Rainbow combines several DQN improvements. Designed for discrete actions.
+# Note: Your trading environment might need discrete action space for this.
+
+rainbow:
+  # Learning rate (typically lower for DQN variants)
+  learning_rate: 0.0000625  # 6.25e-5
+  
+  # Replay buffer size
+  buffer_size: 1_000_000
+  
+  # Batch size
+  batch_size: 32
+  
+  # Discount factor
+  gamma: 0.99
+  
+  # Target network update frequency
+  target_update_interval: 1000
+  
+  # Components (Rainbow combines these)
+  components:
+    double_dqn: true  # Reduces overestimation
+    dueling: true  # Separate value and advantage streams
+    prioritized_replay: true  # Sample important experiences more often
+    multi_step: 3  # N-step returns
+    distributional: true  # C51 distributional RL
+    noisy_nets: true  # Parameter-space exploration
+  
+  # Prioritized Experience Replay parameters
+  per:
+    alpha: 0.6  # How much to prioritize (0 = uniform, 1 = fully prioritized)
+    beta_start: 0.4  # Importance sampling correction (anneals to 1)
+    beta_end: 1.0
+  
+  # Distributional RL parameters (C51)
+  distributional:
+    num_atoms: 51
+    v_min: -10
+    v_max: 10
+  
+  # Noisy nets parameter
+  noisy_sigma: 0.5
+  
+  # Exploration (only used if noisy_nets is false)
+  exploration:
+    initial_eps: 1.0
+    final_eps: 0.01
+    exploration_fraction: 0.1
+  
+  # Learning starts
+  learning_starts: 10_000
+  
+  # Training frequency
+  train_freq: 4
+  gradient_steps: 1
+
+# -----------------------------------------------------------------------------
+# Hyperparameter Search Ranges
+# -----------------------------------------------------------------------------
+# If you want to do hyperparameter tuning, these are reasonable ranges.
+
+hyperparameter_search:
+  ppo:
+    learning_rate: [0.0001, 0.001]  # Log scale
+    n_steps: [1024, 2048, 4096]
+    batch_size: [32, 64, 128]
+    n_epochs: [5, 10, 20]
+    gamma: [0.95, 0.99]
+    clip_range: [0.1, 0.2, 0.3]
+    ent_coef: [0.001, 0.01, 0.1]
+  
+  sac:
+    learning_rate: [0.0001, 0.001]
+    batch_size: [128, 256, 512]
+    gamma: [0.95, 0.99]
+    tau: [0.001, 0.005, 0.01]
+  
+  td3:
+    learning_rate: [0.0001, 0.001]
+    batch_size: [128, 256, 512]
+    gamma: [0.95, 0.99]
+    tau: [0.001, 0.005, 0.01]
+    policy_delay: [1, 2, 4]

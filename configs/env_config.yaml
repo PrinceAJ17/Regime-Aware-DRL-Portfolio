@@ -1,0 +1,197 @@
+# =============================================================================
+# Trading Environment Configuration
+# =============================================================================
+# This file defines parameters for the Gymnasium trading environment.
+# The environment is where your RL agent interacts with the market simulation.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Episode Configuration
+# -----------------------------------------------------------------------------
+# An "episode" is one complete run through the environment (like one game).
+
+episode:
+  length: 252  # Trading days per episode (252 ≈ 1 year)
+  initial_capital: 1_000_000  # Starting portfolio value in dollars
+  
+  # How to initialize the portfolio at episode start
+  initial_weights:
+    method: "equal"  # Options: "equal", "random", "cash"
+    # equal: 20% in each of the 5 assets
+    # random: Random valid weights
+    # cash: 100% in cash (BIL)
+  
+  # When to end an episode early
+  termination:
+    bankruptcy_threshold: 0.10  # End if portfolio drops to 10% of initial
+    max_drawdown: null  # Optional: end if drawdown exceeds this (e.g., 0.50)
+
+# -----------------------------------------------------------------------------
+# State Space Configuration
+# -----------------------------------------------------------------------------
+# The "state" is what the agent observes at each timestep.
+# This is the input to the neural network.
+
+state_space:
+  # Price data (OHLCV)
+  ohlcv:
+    enabled: true
+    lookback_window: 20  # Number of past days to include
+    features:
+      - open
+      - high
+      - low
+      - close
+      - volume
+    normalisation: "returns"  # Convert prices to returns for stationarity
+    volume_normalisation: "log_zscore"  # Log transform then z-score
+  
+  # Technical indicators
+  technical_indicators:
+    enabled: true
+    normalisation: "zscore_rolling"  # Z-score with 60-day rolling window
+  
+  # Relative strength vs benchmark
+  relative_strength:
+    enabled: true
+    benchmark: "SPY"
+    windows: [5, 10, 20]  # Days
+  
+  # Volatility measures
+  volatility:
+    enabled: true
+    windows: [5, 10, 20]
+    include_vix: true
+  
+  # Portfolio state
+  portfolio:
+    enabled: true
+    features:
+      - current_weights      # Current allocation to each asset
+      - unrealized_pnl       # Unrealized profit/loss per asset
+      - cash_ratio           # Fraction of portfolio in cash
+      - rolling_sharpe       # 20-day rolling Sharpe ratio
+      - rolling_beta         # 20-day rolling beta vs SPY
+  
+  # Market microstructure (proxies since we don't have real order book data)
+  microstructure:
+    enabled: true
+    features:
+      - spread_proxy  # (High - Low) / Close as bid-ask spread proxy
+  
+  # Sentiment (optional - set enabled to false if not using)
+  sentiment:
+    enabled: false  # Set to true if you implement sentiment features
+  
+  # Economic indicators
+  economic:
+    enabled: true
+    features:
+      - yield_curve_slope
+      - vix  # Already normalized (it's in percentage points)
+
+# -----------------------------------------------------------------------------
+# Action Space Configuration
+# -----------------------------------------------------------------------------
+# The "action" is what the agent outputs at each timestep.
+# This determines how the portfolio is rebalanced.
+
+action_space:
+  # Which type of action space to use
+  type: "continuous"  # Options: "continuous", "discrete", "hybrid"
+  
+  # Continuous action space settings
+  continuous:
+    # Agent outputs a weight for each asset
+    # Weights are transformed to ensure they sum to 1 and are non-negative
+    output_range: [-1, 1]  # Raw network output range
+    transformation: "softmax"  # Convert to valid portfolio weights
+    
+  # Discrete action space settings (alternative)
+  discrete:
+    # Agent chooses one of several actions per asset
+    actions_per_asset: 3  # 0=reduce, 1=hold, 2=increase
+    change_amount: 0.05  # Change weight by 5% when reducing/increasing
+  
+  # Portfolio constraints
+  constraints:
+    allow_shorting: false  # No negative weights
+    max_weight: 1.0  # Maximum weight in any single asset (1.0 = no limit)
+    min_weight: 0.0  # Minimum weight in any asset
+    max_turnover: null  # Optional: limit daily turnover (e.g., 0.5)
+
+# -----------------------------------------------------------------------------
+# Reward Function Configuration
+# -----------------------------------------------------------------------------
+# The reward shapes what behavior the agent learns.
+# This is one of the most important design choices.
+
+reward:
+  # Primary reward type
+  type: "risk_adjusted"  # Options: "simple", "risk_adjusted", "sharpe", "log"
+  
+  # Risk-adjusted reward parameters
+  risk_adjusted:
+    # Base reward is portfolio return
+    return_scale: 1.0
+    
+    # Transaction cost penalty
+    transaction_cost:
+      enabled: true
+      coefficient: 0.001  # Lambda_cost: penalty per unit of turnover
+    
+    # Drawdown penalty
+    drawdown_penalty:
+      enabled: true
+      coefficient: 0.1  # Lambda_risk: penalty for exceeding threshold
+      threshold: 0.10  # 10% drawdown before penalty kicks in
+    
+    # Optional: Sharpe ratio bonus
+    sharpe_bonus:
+      enabled: false
+      coefficient: 0.01
+      window: 20  # Rolling window for Sharpe calculation
+  
+  # Simple return (alternative)
+  simple:
+    use_log_returns: false  # If true, use log(1 + return)
+  
+  # Scaling
+  scaling:
+    method: "none"  # Options: "none", "standardize", "clip"
+    clip_range: [-10, 10]  # If using clip method
+
+# -----------------------------------------------------------------------------
+# Transaction Cost Model
+# -----------------------------------------------------------------------------
+# Models the real-world costs of trading.
+
+transaction_costs:
+  # Fixed cost per trade (e.g., commission)
+  fixed_cost: 0.0  # Dollars per trade (0 for commission-free brokers)
+  
+  # Proportional cost (percentage of trade value)
+  proportional_cost: 0.0005  # 0.05% = 5 basis points
+  
+  # Slippage (market impact)
+  slippage: 0.0005  # 0.05% = 5 basis points
+  
+  # Total cost per trade ≈ 0.10% = 10 basis points
+  
+  # Apply costs on rebalancing only (not on daily price changes)
+  apply_on: "trades_only"
+
+# -----------------------------------------------------------------------------
+# Environment Dynamics
+# -----------------------------------------------------------------------------
+
+dynamics:
+  # When actions take effect
+  execution: "next_open"  # Options: "same_close", "next_open"
+  # next_open is more realistic: you decide at close, execute at next open
+  
+  # Market hours (for potential future intraday extension)
+  market_hours:
+    open: "09:30"
+    close: "16:00"
+    timezone: "US/Eastern"

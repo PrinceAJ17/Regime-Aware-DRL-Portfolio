@@ -1,0 +1,194 @@
+# =============================================================================
+# Data Configuration
+# =============================================================================
+# This file defines all data sources, date ranges, and preprocessing parameters.
+# Modify these values to change what data is downloaded and how it's processed.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Asset Universe
+# -----------------------------------------------------------------------------
+# These are the assets your portfolio can invest in.
+# We use ETFs because they provide diversified exposure and high liquidity.
+
+assets:
+  SPY:
+    name: "S&P 500 ETF"
+    description: "Tracks the 500 largest US companies"
+    type: "equity"
+    benchmark: true  # This is the market benchmark
+  
+  QQQ:
+    name: "Nasdaq 100 ETF"
+    description: "Tracks 100 largest Nasdaq companies (tech-heavy)"
+    type: "equity"
+    benchmark: false
+  
+  TLT:
+    name: "20+ Year Treasury Bond ETF"
+    description: "Long-term US government bonds"
+    type: "bond"
+    benchmark: false
+  
+  GLD:
+    name: "Gold ETF"
+    description: "Tracks the price of gold"
+    type: "commodity"
+    benchmark: false
+  
+  BIL:
+    name: "1-3 Month T-Bill ETF"
+    description: "Short-term Treasury bills (cash proxy)"
+    type: "cash"
+    benchmark: false
+
+# List of asset tickers for easy iteration
+asset_list:
+  - SPY
+  - QQQ
+  - TLT
+  - GLD
+  - BIL
+
+# -----------------------------------------------------------------------------
+# Date Ranges
+# -----------------------------------------------------------------------------
+# We split data into three periods:
+# - Training: The agent learns from this data
+# - Validation: Used to tune hyperparameters and detect overfitting
+# - Testing: Final evaluation (never used during training/tuning)
+
+date_ranges:
+  training:
+    start: "2010-01-01"
+    end: "2019-12-31"
+    description: "10 years including post-2008 recovery and bull market"
+  
+  validation:
+    start: "2020-01-01"
+    end: "2021-12-31"
+    description: "2 years including COVID crash and recovery"
+  
+  testing:
+    start: "2022-01-01"
+    end: "2023-12-31"
+    description: "2 years including 2022 bear market"
+
+# -----------------------------------------------------------------------------
+# Technical Indicators
+# -----------------------------------------------------------------------------
+# These are the technical analysis features we calculate from price data.
+# Each indicator captures different aspects of market behavior.
+
+technical_indicators:
+  # Momentum indicators - measure speed/strength of price movement
+  rsi:
+    enabled: true
+    length: 14  # 14-day RSI (standard)
+    description: "Relative Strength Index - overbought/oversold signals"
+  
+  # Trend indicators - identify direction of market
+  macd:
+    enabled: true
+    fast: 12
+    slow: 26
+    signal: 9
+    description: "Moving Average Convergence Divergence - trend changes"
+  
+  # Volatility indicators - measure price variability
+  bollinger_bands:
+    enabled: true
+    length: 20
+    std: 2.0
+    description: "Price bands based on standard deviation"
+  
+  atr:
+    enabled: true
+    length: 14
+    description: "Average True Range - typical price movement"
+  
+  # Volume indicators - analyze trading volume
+  obv:
+    enabled: true
+    description: "On-Balance Volume - cumulative volume flow"
+
+# -----------------------------------------------------------------------------
+# Volatility Windows
+# -----------------------------------------------------------------------------
+# We calculate realized volatility over multiple time windows.
+
+volatility_windows:
+  - 5   # 1 week
+  - 10  # 2 weeks
+  - 20  # 1 month
+
+# -----------------------------------------------------------------------------
+# Relative Strength Windows
+# -----------------------------------------------------------------------------
+# Compare each asset's return to the benchmark (SPY) over these periods.
+
+relative_strength_windows:
+  - 5   # 1 week
+  - 10  # 2 weeks
+  - 20  # 1 month
+
+# -----------------------------------------------------------------------------
+# Economic Indicators (from FRED)
+# -----------------------------------------------------------------------------
+# Macroeconomic data from the Federal Reserve.
+
+economic_indicators:
+  treasury_10y:
+    fred_code: "DGS10"
+    description: "10-Year Treasury Constant Maturity Rate"
+  
+  treasury_2y:
+    fred_code: "DGS2"
+    description: "2-Year Treasury Constant Maturity Rate"
+  
+  vix:
+    source: "yahoo"  # VIX is available from Yahoo Finance as ^VIX
+    ticker: "^VIX"
+    description: "CBOE Volatility Index - market fear gauge"
+
+# Derived indicators we calculate from the above
+derived_indicators:
+  yield_curve_slope:
+    formula: "treasury_10y - treasury_2y"
+    description: "Positive = normal, Negative = inverted (recession signal)"
+
+# -----------------------------------------------------------------------------
+# FRED API Configuration
+# -----------------------------------------------------------------------------
+# You need a free API key from https://fred.stlouisfed.org/docs/api/api_key.html
+
+fred:
+  api_key_env_var: "FRED_API_KEY"  # Store your key in environment variable
+  # Or uncomment and add directly (not recommended for git):
+  # api_key: "your_api_key_here"
+
+# -----------------------------------------------------------------------------
+# Data Processing Parameters
+# -----------------------------------------------------------------------------
+
+preprocessing:
+  # How to handle missing values
+  missing_values:
+    method: "ffill"  # Forward fill (use previous day's value)
+    max_consecutive: 5  # Maximum consecutive missing days before warning
+  
+  # Normalisation method for features
+  normalisation:
+    method: "zscore"  # (x - mean) / std
+    rolling_window: 60  # Use 60-day rolling statistics
+  
+  # Price data
+  price_column: "Adj Close"  # Use adjusted close for accurate returns
+
+# -----------------------------------------------------------------------------
+# Cache Settings
+# -----------------------------------------------------------------------------
+
+cache:
+  enabled: true
+  expiry_days: 1  # Re-download if cache is older than this

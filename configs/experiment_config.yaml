@@ -1,0 +1,335 @@
+# =============================================================================
+# Experiment Configuration
+# =============================================================================
+# This file defines the experiments that test your research hypotheses.
+# Each experiment is a systematic comparison designed to answer a question.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Research Hypotheses
+# -----------------------------------------------------------------------------
+# These are the questions your experiments aim to answer.
+
+hypotheses:
+  H1:
+    statement: "Regime-aware replay improves risk-adjusted returns compared to standard uniform replay"
+    primary: true
+    experiment: "replay_comparison"
+  
+  H2:
+    statement: "Balanced sampling reduces performance variance across different market regimes"
+    primary: false
+    experiment: "regime_performance"
+  
+  H3:
+    statement: "Inverse-frequency sampling improves performance during rare regimes (bear markets)"
+    primary: false
+    experiment: "regime_performance"
+  
+  H4:
+    statement: "Current-focused sampling improves short-term performance but may reduce adaptability"
+    primary: false
+    experiment: "regime_performance"
+  
+  H5:
+    statement: "Regime-aware replay benefits are consistent across different RL algorithms"
+    primary: false
+    experiment: "replay_comparison"
+  
+  H6:
+    statement: "Regime-aware replay is robust to moderate noise in regime detection"
+    primary: false
+    experiment: "robustness"
+
+# -----------------------------------------------------------------------------
+# Experiment 1: Replay Strategy Comparison (Main Experiment)
+# -----------------------------------------------------------------------------
+# Compares all algorithms with all replay strategies.
+# This is your core experiment.
+
+experiments:
+  replay_comparison:
+    name: "Replay Strategy Comparison"
+    description: "Compare standard vs regime-aware replay across all algorithms"
+    
+    # Independent variables (what we vary)
+    variables:
+      algorithms:
+        - ppo
+        - sac
+        - td3
+        - rainbow
+      
+      replay_strategies:
+        - standard  # Baseline: uniform random sampling
+        - balanced  # Equal samples from each regime
+        - current_focused  # Oversample current regime
+        - inverse_frequency  # Oversample rare regimes
+        - adaptive  # Dynamic based on TD error
+    
+    # Fixed variables (what we keep constant)
+    fixed:
+      total_timesteps: 1_000_000
+      regime_detector: "rule_based"  # Use simpler detector for main experiment
+    
+    # Number of repetitions (for statistical significance)
+    seeds: [42, 123, 456, 789, 1000]
+    
+    # Total runs: 4 algorithms × 5 strategies × 5 seeds = 100 runs
+    
+    # Primary metrics to compare
+    metrics:
+      - cumulative_return
+      - sharpe_ratio
+      - max_drawdown
+      - sortino_ratio
+    
+    # Statistical tests
+    analysis:
+      pairwise_test: "welch_t_test"
+      significance_level: 0.05
+      multiple_comparison_correction: "bonferroni"
+
+  # ---------------------------------------------------------------------------
+  # Experiment 2: Regime-Specific Performance
+  # ---------------------------------------------------------------------------
+  regime_performance:
+    name: "Regime-Specific Performance Analysis"
+    description: "Break down performance by market regime (bull/bear/sideways)"
+    
+    # Use best configuration from Experiment 1
+    variables:
+      algorithms:
+        - ppo
+        - sac
+        - td3
+        - rainbow
+      
+      replay_strategies:
+        - standard
+        - balanced
+        - inverse_frequency
+    
+    fixed:
+      total_timesteps: 1_000_000
+    
+    seeds: [42, 123, 456, 789, 1000]
+    
+    # Regime-specific metrics
+    metrics:
+      by_regime:
+        - regime_sharpe_ratio
+        - regime_return
+        - regime_volatility
+      
+      transitions:
+        - adaptation_speed  # How quickly agent adapts to regime change
+        - transition_loss   # Performance during regime transitions
+
+  # ---------------------------------------------------------------------------
+  # Experiment 3: Robustness to Detection Noise
+  # ---------------------------------------------------------------------------
+  robustness:
+    name: "Robustness to Regime Detection Noise"
+    description: "Test if regime-aware replay works with imperfect regime detection"
+    
+    variables:
+      noise_levels:
+        - 0.0   # Perfect detection (baseline)
+        - 0.1   # 10% mislabeled
+        - 0.2   # 20% mislabeled
+        - 0.3   # 30% mislabeled
+      
+      replay_strategies:
+        - standard  # Should be unaffected by noise
+        - balanced
+        - inverse_frequency
+    
+    fixed:
+      algorithm: "sac"  # Use one algorithm to reduce compute
+      total_timesteps: 500_000
+    
+    seeds: [42, 123, 456]
+    
+    metrics:
+      - sharpe_ratio
+      - sharpe_ratio_degradation  # % decrease from no-noise baseline
+
+  # ---------------------------------------------------------------------------
+  # Experiment 4: Feature Ablation
+  # ---------------------------------------------------------------------------
+  feature_ablation:
+    name: "Feature Engineering Ablation"
+    description: "Compare raw OHLCV features vs full engineered feature set"
+    
+    variables:
+      feature_sets:
+        raw_only:
+          ohlcv: true
+          technical_indicators: false
+          relative_strength: false
+          volatility: false
+          economic: false
+        
+        full:
+          ohlcv: true
+          technical_indicators: true
+          relative_strength: true
+          volatility: true
+          economic: true
+      
+      algorithms:
+        - ppo
+        - sac
+    
+    fixed:
+      replay_strategy: "balanced"
+      total_timesteps: 500_000
+    
+    seeds: [42, 123, 456, 789, 1000]
+    
+    metrics:
+      - sharpe_ratio
+      - training_stability  # Variance of reward during training
+
+  # ---------------------------------------------------------------------------
+  # Experiment 5: Regime Detection Method Comparison
+  # ---------------------------------------------------------------------------
+  regime_detection:
+    name: "Regime Detection Method Comparison"
+    description: "Compare rule-based vs HMM regime detection"
+    
+    variables:
+      detection_methods:
+        - rule_based
+        - hmm
+      
+      replay_strategies:
+        - balanced
+        - inverse_frequency
+    
+    fixed:
+      algorithm: "sac"
+      total_timesteps: 500_000
+    
+    seeds: [42, 123, 456]
+    
+    metrics:
+      - sharpe_ratio
+      - regime_accuracy  # If we have "ground truth" regimes
+
+  # ---------------------------------------------------------------------------
+  # Experiment 6: Sample Efficiency
+  # ---------------------------------------------------------------------------
+  sample_efficiency:
+    name: "Sample Efficiency Comparison"
+    description: "Compare learning speed of different replay strategies"
+    
+    variables:
+      replay_strategies:
+        - standard
+        - balanced
+        - inverse_frequency
+      
+      algorithms:
+        - sac
+        - td3
+    
+    fixed:
+      total_timesteps: 1_000_000
+    
+    seeds: [42, 123, 456, 789, 1000]
+    
+    # Track metrics at regular intervals
+    evaluation_points:
+      - 50_000
+      - 100_000
+      - 200_000
+      - 500_000
+      - 1_000_000
+    
+    metrics:
+      - timesteps_to_threshold  # Steps to reach Sharpe > 1.0
+      - area_under_learning_curve
+
+# -----------------------------------------------------------------------------
+# Baselines for Comparison
+# -----------------------------------------------------------------------------
+# Non-RL strategies to compare against.
+
+baselines:
+  buy_and_hold:
+    name: "Buy and Hold SPY"
+    description: "100% SPY, no rebalancing"
+    allocation:
+      SPY: 1.0
+    rebalance: never
+  
+  equal_weight:
+    name: "Equal Weight"
+    description: "20% in each asset, monthly rebalancing"
+    allocation:
+      SPY: 0.2
+      QQQ: 0.2
+      TLT: 0.2
+      GLD: 0.2
+      BIL: 0.2
+    rebalance: monthly
+  
+  sixty_forty:
+    name: "60/40 Portfolio"
+    description: "Traditional 60% stocks, 40% bonds"
+    allocation:
+      SPY: 0.6
+      TLT: 0.4
+    rebalance: monthly
+  
+  momentum:
+    name: "Momentum Strategy"
+    description: "Invest in top 2 assets by 12-1 month return"
+    lookback: 252  # 12 months
+    skip: 21  # Skip most recent month
+    top_n: 2
+    rebalance: monthly
+
+# -----------------------------------------------------------------------------
+# Success Criteria
+# -----------------------------------------------------------------------------
+# Define what "success" means for the project.
+
+success_criteria:
+  primary:
+    description: "Regime-aware replay achieves statistically significant improvement"
+    condition: "p < 0.05 for Sharpe ratio improvement in at least 3 of 4 algorithms"
+  
+  secondary:
+    - description: "Reduced maximum drawdown"
+      condition: "At least one strategy reduces MDD by >10% relative to standard"
+    
+    - description: "Improved bear market performance"
+      condition: "Regime-specific Sharpe in bear markets improves by >20%"
+    
+    - description: "Robustness to noise"
+      condition: "Performance advantage persists with up to 20% regime label noise"
+
+# -----------------------------------------------------------------------------
+# Compute Budget
+# -----------------------------------------------------------------------------
+# Estimated computational requirements.
+
+compute_budget:
+  estimated_hours_per_run: 3  # On CPU
+  
+  total_runs:
+    replay_comparison: 100  # 4 × 5 × 5
+    regime_performance: 60  # 4 × 3 × 5
+    robustness: 36  # 4 × 3 × 3
+    feature_ablation: 20  # 2 × 2 × 5
+    regime_detection: 12  # 2 × 2 × 3
+    sample_efficiency: 30  # 3 × 2 × 5
+  
+  total_estimated_hours: 774  # Rough estimate
+  
+  parallelisation:
+    max_concurrent_runs: 4  # If you have multiple CPU cores
+    estimated_wall_time_hours: 194  # With parallelisation
