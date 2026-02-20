@@ -104,7 +104,7 @@ portfolio-rl-env/
 # -----------------------------------------------------------------------------
 # Data can be re-downloaded, and may be too large for Git
 
-data/
+/data/
 *.csv
 *.parquet
 *.pkl
