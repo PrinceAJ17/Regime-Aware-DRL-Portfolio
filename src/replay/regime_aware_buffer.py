@@ -64,15 +64,16 @@ from enum import Enum
 import random
 
 # Import from our other modules
-import sys
-sys.path.append('..')
-from src.replay.standard_buffer import Experience
+from .standard_buffer import Experience
+
+# Import canonical MarketRegime from regime module
+from ..regime import MarketRegime
 
 
 class SamplingStrategy(Enum):
     """
     Available sampling strategies for regime-aware replay.
-    
+
     Each strategy has a different hypothesis about what leads
     to better learning. Part of your research is comparing them.
     """
@@ -80,13 +81,6 @@ class SamplingStrategy(Enum):
     CURRENT_FOCUSED = 'current_focused'
     INVERSE_FREQUENCY = 'inverse_frequency'
     ADAPTIVE = 'adaptive'
-
-
-class MarketRegime(Enum):
-    """Market regime labels."""
-    BULL = 'bull'
-    BEAR = 'bear'
-    SIDEWAYS = 'sideways'
 
 
 class RegimeExperience:
@@ -645,6 +639,16 @@ class RegimeAwareReplayBuffer:
             'regimes': regime_indices  # 0=bull, 1=bear, 2=sideways
         }
     
+    def clear(self) -> None:
+        """Clear all experiences from all regime buffers."""
+        for regime in MarketRegime:
+            self._regime_buffers[regime].clear()
+        self._total_added = 0
+        self._total_sampled = 0
+        self._samples_per_regime = {regime: 0 for regime in MarketRegime}
+        self._td_errors_sum = {regime: 1.0 for regime in MarketRegime}
+        self._td_errors_count = {regime: 1 for regime in MarketRegime}
+
     def is_full(self) -> bool:
         """Check if buffer is full (for SB3 compatibility)."""
         return len(self) >= self.total_buffer_size

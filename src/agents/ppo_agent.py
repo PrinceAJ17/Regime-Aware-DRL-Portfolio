@@ -146,47 +146,63 @@ class RegimeObservationWrapper(gym.ObservationWrapper):
     - "If we're in a bear market, do Y"
     """
     
-    def __init__(self, env: gym.Env, regime_detector):
+    def __init__(self, env: gym.Env, regime_detector, price_data=None):
         """
         Initialize wrapper.
-        
+
         Parameters:
         -----------
         env : gym.Env
             The trading environment
-            
+
         regime_detector : UnifiedRegimeDetector
             For detecting current market regime
+
+        price_data : optional
+            Price data for caching regime series
         """
         super().__init__(env)
         self.regime_detector = regime_detector
-        
+
         # Modify observation space to include regime
         original_shape = env.observation_space.shape[0]
         new_shape = original_shape + 3  # Add 3 for regime one-hot
-        
+
         self.observation_space = gym.spaces.Box(
             low=-np.inf,
             high=np.inf,
             shape=(new_shape,),
             dtype=np.float32
         )
-        
+
         # Track current regime
         self.current_regime = 'sideways'
-    
+
+        # Cache regime series for O(1) lookups
+        self._regime_cache = None
+        if price_data is not None and regime_detector is not None:
+            try:
+                self._regime_cache = regime_detector.detect(price_data)
+            except Exception:
+                self._regime_cache = None
+
     def observation(self, obs: np.ndarray) -> np.ndarray:
         """Augment observation with regime one-hot."""
-        # Get current regime
-        if hasattr(self.env, 'get_current_data'):
-            current_data = self.env.get_current_data()
-            self.current_regime = self.regime_detector.detect_current(current_data)
-        
+        # Get current regime from cached series
+        if self._regime_cache is not None:
+            inner_env = self.env
+            if hasattr(inner_env, 'unwrapped'):
+                inner_env = inner_env.unwrapped
+            current_step = getattr(inner_env, 'current_step', None)
+            if current_step is not None and 0 <= current_step < len(self._regime_cache):
+                regime_val = self._regime_cache.iloc[current_step]
+                self.current_regime = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+
         # Create one-hot encoding
         regime_onehot = np.zeros(3, dtype=np.float32)
         regime_idx = {'bull': 0, 'bear': 1, 'sideways': 2}
         regime_onehot[regime_idx.get(self.current_regime, 2)] = 1.0
-        
+
         # Concatenate
         augmented_obs = np.concatenate([obs, regime_onehot])
         return augmented_obs
@@ -206,31 +222,47 @@ class RegimeMetricsCallback(BaseCallback):
         self,
         regime_detector,
         env,
+        price_data=None,
         verbose: int = 0
     ):
         super().__init__(verbose)
         self.regime_detector = regime_detector
         self.env = env
-        
+
+        # Cache regime series for O(1) lookups
+        self._regime_cache = None
+        if price_data is not None and regime_detector is not None:
+            try:
+                self._regime_cache = regime_detector.detect(price_data)
+            except Exception:
+                self._regime_cache = None
+
         # Tracking
         self.regime_rewards = {'bull': [], 'bear': [], 'sideways': []}
         self.regime_steps = {'bull': 0, 'bear': 0, 'sideways': 0}
         self.current_regime = 'sideways'
-        
+
         # Episode tracking
         self.episode_regime_rewards = {'bull': 0, 'bear': 0, 'sideways': 0}
-    
+
     def _on_step(self) -> bool:
         """Called after each environment step."""
-        # Get current regime
+        # Get current regime from cached series
         if hasattr(self.env, 'envs'):
-            # VecEnv
             base_env = self.env.envs[0]
         else:
             base_env = self.env
-        
-        if hasattr(base_env, 'current_regime'):
-            self.current_regime = base_env.current_regime
+
+        if hasattr(base_env, 'unwrapped'):
+            inner_env = base_env.unwrapped
+        else:
+            inner_env = base_env
+
+        if self._regime_cache is not None:
+            current_step = getattr(inner_env, 'current_step', None)
+            if current_step is not None and 0 <= current_step < len(self._regime_cache):
+                regime_val = self._regime_cache.iloc[current_step]
+                self.current_regime = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
         
         # Get reward
         reward = self.locals.get('rewards', [0])[0]
@@ -345,12 +377,13 @@ class PPOAgent(BaseAgent):
             Verbosity level
         """
         self.ppo_config = ppo_config or PPOConfig()
-        
+
         # Wrap environment if adding regime to obs
         self.original_env = env
         if self.ppo_config.add_regime_to_obs and regime_detector is not None:
             self._log_message = f"Wrapping environment with regime observations"
-            env = RegimeObservationWrapper(env, regime_detector)
+            price_data = self._get_price_data_from_env_static(env)
+            env = RegimeObservationWrapper(env, regime_detector, price_data=price_data)
         
         # Store for base class
         config = self.ppo_config.to_dict()
@@ -367,6 +400,19 @@ class PPOAgent(BaseAgent):
         # Regime metrics callback (created during training)
         self.regime_callback = None
     
+    @staticmethod
+    def _get_price_data_from_env_static(env):
+        """Extract price data from environment for regime detection."""
+        e = env
+        if hasattr(e, 'envs'):
+            e = e.envs[0]
+        if hasattr(e, 'unwrapped'):
+            e = e.unwrapped
+        for attr in ('price_data', '_price_data', 'data', 'df'):
+            if hasattr(e, attr):
+                return getattr(e, attr)
+        return None
+
     def _log(self, message: str, level: int = 1):
         """Override to handle pre-init logging."""
         if hasattr(self, 'verbose') and self.verbose >= level:
@@ -453,9 +499,11 @@ class PPOAgent(BaseAgent):
 
         # Add regime metrics callback if tracking
         if self.ppo_config.track_regime_metrics and self.regime_detector is not None:
+            price_data = self._get_price_data_from_env_static(self.original_env)
             self.regime_callback = RegimeMetricsCallback(
                 regime_detector=self.regime_detector,
                 env=self.original_env,
+                price_data=price_data,
                 verbose=self.verbose
             )
             callback_list.append(self.regime_callback)
@@ -464,7 +512,8 @@ class PPOAgent(BaseAgent):
         if eval_env is not None:
             # Wrap eval env if needed
             if self.ppo_config.add_regime_to_obs and self.regime_detector is not None:
-                eval_env = RegimeObservationWrapper(eval_env, self.regime_detector)
+                eval_price_data = self._get_price_data_from_env_static(eval_env)
+                eval_env = RegimeObservationWrapper(eval_env, self.regime_detector, price_data=eval_price_data)
             
             eval_callback = EvalCallback(
                 eval_env,

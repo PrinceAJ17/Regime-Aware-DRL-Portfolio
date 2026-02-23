@@ -47,35 +47,33 @@ import warnings
 
 
 # =============================================================================
-# MarketRegime Enum (always available)
-# =============================================================================
-
-class MarketRegime(Enum):
-    """Market regime labels."""
-    BULL = 'bull'
-    BEAR = 'bear'
-    SIDEWAYS = 'sideways'
-    
-    def __str__(self):
-        return self.value
-
-
-# =============================================================================
-# Try to import detectors, fall back gracefully
+# Try to import detectors and canonical MarketRegime, fall back gracefully
 # =============================================================================
 
 RuleBasedRegimeDetector = None
 HMMRegimeDetector = None
 RegimeDetectionConfig = None
+MarketRegime = None
 
 try:
     from .rule_based_detector import (
         RuleBasedRegimeDetector,
         RegimeDetectionConfig,
-        MarketRegime as _MarketRegime
+        MarketRegime,
     )
 except ImportError as e:
     pass
+
+# Fallback MarketRegime if rule_based_detector couldn't be imported
+if MarketRegime is None:
+    class MarketRegime(Enum):
+        """Market regime labels (fallback definition)."""
+        BULL = 'bull'
+        BEAR = 'bear'
+        SIDEWAYS = 'sideways'
+
+        def __str__(self):
+            return self.value
 
 try:
     from .hmm_detector import HMMRegimeDetector

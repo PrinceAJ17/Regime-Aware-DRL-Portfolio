@@ -506,33 +506,55 @@ class BaseAgent(ABC):
                 "No regime detector set. Cannot evaluate by regime. "
                 "Pass regime_detector to agent constructor."
             )
-        
+
+        # Pre-compute regime cache from price data
+        _regime_cache = None
+        env = eval_env
+        if hasattr(env, 'envs'):
+            env = env.envs[0]
+        if hasattr(env, 'unwrapped'):
+            env = env.unwrapped
+        for attr in ('price_data', '_price_data', 'data', 'df'):
+            if hasattr(env, attr):
+                try:
+                    _regime_cache = self.regime_detector.detect(getattr(env, attr))
+                except Exception:
+                    pass
+                break
+
         regime_rewards = {'bull': [], 'bear': [], 'sideways': []}
-        
+
         for _ in range(n_episodes):
             obs, info = eval_env.reset()
             done = False
-            
+
             # Track rewards per regime within episode
             episode_regime_rewards = {'bull': 0, 'bear': 0, 'sideways': 0}
             episode_regime_steps = {'bull': 0, 'bear': 0, 'sideways': 0}
-            
+
             while not done:
-                # Get current regime
-                if hasattr(eval_env, 'get_current_data'):
-                    current_data = eval_env.get_current_data()
-                    regime = self.regime_detector.detect_current(current_data)
-                else:
-                    regime = 'sideways'  # Default if can't detect
-                
+                # Get current regime from cached series
+                regime = 'sideways'  # Default
+                if _regime_cache is not None:
+                    # Get current step from env
+                    inner_env = eval_env
+                    if hasattr(inner_env, 'envs'):
+                        inner_env = inner_env.envs[0]
+                    if hasattr(inner_env, 'unwrapped'):
+                        inner_env = inner_env.unwrapped
+                    current_step = getattr(inner_env, 'current_step', None)
+                    if current_step is not None and 0 <= current_step < len(_regime_cache):
+                        regime_val = _regime_cache.iloc[current_step]
+                        regime = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+
                 action, _ = self.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = eval_env.step(action)
                 done = terminated or truncated
-                
+
                 # Track reward by regime
                 episode_regime_rewards[regime] += reward
                 episode_regime_steps[regime] += 1
-            
+
             # Calculate mean reward per regime for this episode
             for regime in regime_rewards:
                 if episode_regime_steps[regime] > 0:
@@ -606,10 +628,13 @@ class ReplayBufferWrapper:
         action_space,
         device: str = "cpu",
         n_envs: int = 1,
+        regime_detector=None,
+        price_data=None,
+        env=None,
     ):
         """
         Initialize the wrapper.
-        
+
         Parameters:
         -----------
         regime_buffer : RegimeAwareReplayBuffer
@@ -622,13 +647,21 @@ class ReplayBufferWrapper:
             Device for tensors ("cpu" or "cuda")
         n_envs : int
             Number of parallel environments (usually 1)
+        regime_detector : optional
+            Regime detector for labelling experiences
+        price_data : optional
+            Price data for regime detection caching
+        env : optional
+            Environment reference for step lookups
         """
         self.regime_buffer = regime_buffer
         self.observation_space = observation_space
         self.action_space = action_space
         self.device = device
         self.n_envs = n_envs
-        
+        self.regime_detector = regime_detector
+        self._env = env
+
         # SB3 expects these attributes
         # Handle both possible attribute names (buffer_size or total_buffer_size)
         if hasattr(regime_buffer, 'buffer_size'):
@@ -639,10 +672,32 @@ class ReplayBufferWrapper:
             self.buffer_size = 1_000_000  # Default fallback
         self.pos = 0
         self.full = False
-        
+        self.optimize_memory_usage = False
+
         # Track current regime for sampling
         self._current_regime = None
+
+        # Cache regime series for O(1) lookups
+        self._regime_cache = None
+        if price_data is not None and regime_detector is not None:
+            try:
+                self._regime_cache = regime_detector.detect(price_data)
+            except Exception:
+                self._regime_cache = None
     
+    def _get_env_step(self) -> Optional[int]:
+        """Get the current step index from the environment."""
+        env = self._env
+        if env is None:
+            return None
+        if hasattr(env, 'current_step'):
+            return env.current_step
+        if hasattr(env, 'envs') and hasattr(env.envs[0], 'current_step'):
+            return env.envs[0].current_step
+        if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'current_step'):
+            return env.unwrapped.current_step
+        return None
+
     def add(
         self,
         obs: np.ndarray,
@@ -654,23 +709,35 @@ class ReplayBufferWrapper:
     ) -> None:
         """
         Add experience to buffer (SB3 format).
-        
-        SB3 calls this method during training. We translate to our format
-        and add to the regime-aware buffer.
-        """
-        # Get regime from info if available, otherwise use stored current regime
-        regime = None
-        if infos and len(infos) > 0 and isinstance(infos[0], dict):
-            regime = infos[0].get('regime', self._current_regime)
-        
-        if regime is None:
-            regime = self._current_regime
 
-        # Default to sideways if no regime detected
-        if regime is None:
-            from src.replay.regime_aware_buffer import MarketRegime
-            regime = MarketRegime.SIDEWAYS
-        
+        SB3 calls this method during training. We translate to our format
+        and add to the regime-aware buffer with proper regime detection.
+        """
+        from src.replay.regime_aware_buffer import MarketRegime
+
+        regime_str = 'sideways'  # Default
+
+        # Method 1: Check if environment provides regime in info
+        if infos and len(infos) > 0 and isinstance(infos[0], dict) and 'regime' in infos[0]:
+            regime_str = infos[0]['regime']
+
+        # Method 2: Use cached regime series + env step index
+        elif self._regime_cache is not None:
+            current_step = self._get_env_step()
+            if current_step is not None and 0 <= current_step < len(self._regime_cache):
+                regime_val = self._regime_cache.iloc[current_step]
+                regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+
+        # Method 3: Use stored current regime from callback
+        elif self._current_regime is not None:
+            if hasattr(self._current_regime, 'value'):
+                regime_str = self._current_regime.value
+            else:
+                regime_str = str(self._current_regime)
+
+        # Convert string to enum
+        regime = MarketRegime(regime_str)
+
         # Handle batched inputs (n_envs > 1)
         if len(obs.shape) > 1:
             for i in range(obs.shape[0]):
@@ -691,7 +758,7 @@ class ReplayBufferWrapper:
                 done=bool(done),
                 regime=regime,
             )
-        
+
         # Update position tracking for SB3
         self.pos = len(self.regime_buffer) % self.buffer_size
         self.full = len(self.regime_buffer) >= self.buffer_size
@@ -740,7 +807,8 @@ class ReplayBufferWrapper:
     
     def reset(self) -> None:
         """Reset the buffer."""
-        self.regime_buffer.clear()
+        if hasattr(self.regime_buffer, 'clear'):
+            self.regime_buffer.clear()
         self.pos = 0
         self.full = False
 

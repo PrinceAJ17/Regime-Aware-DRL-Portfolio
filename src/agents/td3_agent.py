@@ -43,15 +43,19 @@ from typing import Optional, Dict, Any, Union, Callable
 from pathlib import Path
 import yaml
 
-from stable_baselines3 import TD3
-from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
-from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, CheckpointCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from stable_baselines3.common.buffers import ReplayBuffer
+try:
+    from stable_baselines3 import TD3
+    from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
+    from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, CheckpointCallback
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+    from stable_baselines3.common.buffers import ReplayBuffer
+    SB3_AVAILABLE = True
+except ImportError:
+    SB3_AVAILABLE = False
 import gymnasium as gym
 
 # Import base class
-from .base_agent import BaseAgent, ReplayBufferWrapper
+from .base_agent import BaseAgent, ReplayBufferWrapper, TrainingConfig, TrainingMetrics
 
 # Try to import regime-aware buffer (optional dependency)
 try:
@@ -104,6 +108,7 @@ class TD3Agent(BaseAgent):
         env: gym.Env,
         config: Optional[Dict[str, Any]] = None,
         replay_buffer: Optional[Any] = None,
+        regime_detector=None,
         action_noise: Optional[str] = "normal",
         noise_std: float = 0.1,
         tensorboard_log: Optional[str] = None,
@@ -147,20 +152,24 @@ class TD3Agent(BaseAgent):
         self.custom_replay_buffer = replay_buffer
         self.action_noise_type = action_noise
         self.noise_std = noise_std
-        
+
         # Load config if not provided
         if config is None:
             config = self._load_default_config()
-        
+
         # Track training info
         self.training_info = {
             "total_timesteps": 0,
             "episodes": 0,
             "best_reward": float("-inf"),
         }
-        
+
         # Call parent init (this calls _setup_model)
-        super().__init__(env, name=name, config=config, replay_buffer=replay_buffer, verbose=verbose)
+        super().__init__(
+            env, name=name, config=config,
+            regime_detector=regime_detector,
+            replay_buffer=replay_buffer, verbose=verbose
+        )
     
     def _load_default_config(self) -> Dict[str, Any]:
         """Load default TD3 configuration from YAML file."""
@@ -244,9 +253,25 @@ class TD3Agent(BaseAgent):
         else:
             raise ValueError(f"Unknown noise type: {noise_type}. Use 'normal', 'ou', or None.")
     
+    def _get_price_data_from_env(self):
+        """Extract price data from environment for regime detection."""
+        env = self.env
+        if hasattr(env, 'envs'):
+            env = env.envs[0]
+        if hasattr(env, 'unwrapped'):
+            env = env.unwrapped
+        for attr in ('price_data', '_price_data', 'data', 'df'):
+            if hasattr(env, attr):
+                return getattr(env, attr)
+        return None
+
     def _setup_model(self) -> None:
         """Create the TD3 model with configured hyperparameters."""
-        
+        if not SB3_AVAILABLE:
+            raise ImportError(
+                "stable-baselines3 required for TD3. Install with: pip install stable-baselines3"
+            )
+
         # Create action noise for exploration
         self.action_noise = self._create_action_noise(self.action_noise_type, self.noise_std)
         
@@ -300,11 +325,14 @@ class TD3Agent(BaseAgent):
           automatically when the model samples experiences
         """
         if REGIME_BUFFER_AVAILABLE and isinstance(self.replay_buffer, RegimeAwareReplayBuffer):
-            # Wrap for SB3 compatibility
+            # Wrap for SB3 compatibility with regime detection
             wrapped_buffer = ReplayBufferWrapper(
                 self.replay_buffer,
                 observation_space=self.env.observation_space,
-                action_space=self.env.action_space
+                action_space=self.env.action_space,
+                regime_detector=self.regime_detector,
+                price_data=self._get_price_data_from_env(),
+                env=self.env,
             )
             model.replay_buffer = wrapped_buffer
             print(f"✓ TD3 using RegimeAwareReplayBuffer with {self.replay_buffer.strategy.value} sampling")
@@ -319,9 +347,9 @@ class TD3Agent(BaseAgent):
     
     def train(
         self,
+        training_config: 'TrainingConfig' = None,
         total_timesteps: int = None,
-        training_config = None,
-        callback: Optional[BaseCallback] = None,
+        callback=None,
         log_interval: int = 100,
         eval_env: Optional[gym.Env] = None,
         eval_freq: int = 10_000,
@@ -330,23 +358,23 @@ class TD3Agent(BaseAgent):
         save_path: Optional[str] = None,
         reset_num_timesteps: bool = False,
         progress_bar: bool = True,
-    ) -> "TD3Agent":
+        callbacks: Optional[list] = None,
+    ) -> 'TrainingMetrics':
         """
         Train the TD3 agent.
-        
+
         Parameters:
         -----------
-        total_timesteps : int
-            Total number of environment steps to train for.
-            Your spec says 1,000,000 for full training.
         training_config : TrainingConfig, optional
-            Training configuration object (alternative to individual params)
+            Training configuration object
+        total_timesteps : int, optional
+            Total number of environment steps to train for
         callback : BaseCallback, optional
             Custom callback for monitoring/early stopping
         log_interval : int
             How often to log training info
         eval_env : gym.Env, optional
-            Separate environment for evaluation (recommended)
+            Separate environment for evaluation
         eval_freq : int
             Evaluate every N steps
         n_eval_episodes : int
@@ -359,11 +387,13 @@ class TD3Agent(BaseAgent):
             Whether to reset the timestep counter
         progress_bar : bool
             Show training progress bar
-        
+        callbacks : list, optional
+            Additional callbacks (for BaseAgent interface compatibility)
+
         Returns:
         --------
-        self : TD3Agent
-            Returns self for method chaining
+        TrainingMetrics
+            Training history and performance metrics
         """
         # Handle training_config if provided
         if training_config is not None:
@@ -372,17 +402,18 @@ class TD3Agent(BaseAgent):
             n_eval_episodes = training_config.n_eval_episodes
             save_freq = training_config.save_freq
             save_path = save_path or training_config.save_path
-        
+
         # Default total_timesteps if still None
         if total_timesteps is None:
             total_timesteps = 100_000
+
         # Build callback list
-        callbacks = []
-        
+        cb_list = list(callbacks or [])
+
         # Add user callback
         if callback is not None:
-            callbacks.append(callback)
-        
+            cb_list.append(callback)
+
         # Add evaluation callback
         if eval_env is not None:
             eval_callback = EvalCallback(
@@ -395,8 +426,8 @@ class TD3Agent(BaseAgent):
                 render=False,
                 verbose=self.verbose,
             )
-            callbacks.append(eval_callback)
-        
+            cb_list.append(eval_callback)
+
         # Add checkpoint callback
         if save_path is not None:
             checkpoint_callback = CheckpointCallback(
@@ -405,12 +436,12 @@ class TD3Agent(BaseAgent):
                 name_prefix="td3",
                 verbose=self.verbose,
             )
-            callbacks.append(checkpoint_callback)
-        
+            cb_list.append(checkpoint_callback)
+
         # Combine callbacks
         from stable_baselines3.common.callbacks import CallbackList
-        combined_callback = CallbackList(callbacks) if callbacks else None
-        
+        combined_callback = CallbackList(cb_list) if cb_list else None
+
         # Train!
         self.model.learn(
             total_timesteps=total_timesteps,
@@ -419,11 +450,12 @@ class TD3Agent(BaseAgent):
             reset_num_timesteps=reset_num_timesteps,
             progress_bar=progress_bar,
         )
-        
+
         # Update training info
         self.training_info["total_timesteps"] += total_timesteps
-        
-        return self
+        self.total_timesteps += total_timesteps
+
+        return self.metrics
     
     def predict(
         self,

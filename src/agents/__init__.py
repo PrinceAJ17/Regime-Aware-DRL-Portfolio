@@ -39,31 +39,43 @@ Project: Regime-Aware Experience Replay for DRL Portfolio Management
 from .base_agent import BaseAgent, ReplayBufferWrapper
 from .ppo_agent import PPOAgent
 from .sac_agent import SACAgent
-from .td3_agent import TD3Agent
-from .rainbow_agent import RainbowAgent, DiscreteActionWrapper
+
+# TD3 and Rainbow depend on stable-baselines3 / torch at import time
+try:
+    from .td3_agent import TD3Agent
+except ImportError:
+    TD3Agent = None
+
+try:
+    from .rainbow_agent import RainbowAgent, DiscreteActionWrapper
+except ImportError:
+    RainbowAgent = None
+    DiscreteActionWrapper = None
 
 __all__ = [
     # Base class
     "BaseAgent",
     "ReplayBufferWrapper",
-    
+
     # Continuous action agents
     "PPOAgent",
-    "SACAgent", 
+    "SACAgent",
     "TD3Agent",
-    
+
     # Discrete action agents
     "RainbowAgent",
     "DiscreteActionWrapper",
 ]
 
-# Agent registry for easy iteration
+# Agent registry for easy iteration (skip unavailable agents)
 AGENTS = {
     "ppo": PPOAgent,
     "sac": SACAgent,
-    "td3": TD3Agent,
-    "rainbow": RainbowAgent,
 }
+if TD3Agent is not None:
+    AGENTS["td3"] = TD3Agent
+if RainbowAgent is not None:
+    AGENTS["rainbow"] = RainbowAgent
 
 # Agents that use replay buffers (benefit from regime-aware replay)
 REPLAY_BUFFER_AGENTS = ["sac", "td3", "rainbow"]

@@ -84,7 +84,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 # Import base class
-from .base_agent import BaseAgent
+from .base_agent import BaseAgent, TrainingConfig, TrainingMetrics
 
 # Try to import regime-aware buffer
 try:
@@ -887,8 +887,8 @@ class RainbowAgent(BaseAgent):
     
     def train(
         self,
+        training_config: 'TrainingConfig' = None,
         total_timesteps: int = None,
-        training_config = None,
         eval_freq: int = 10_000,
         eval_episodes: int = 5,
         save_freq: int = 50_000,
@@ -896,16 +896,16 @@ class RainbowAgent(BaseAgent):
         progress_bar: bool = True,
         eval_env: Optional[gym.Env] = None,
         callbacks: Optional[List] = None,
-    ) -> Dict[str, List[float]]:
+    ) -> 'TrainingMetrics':
         """
         Train the Rainbow agent.
-        
+
         Parameters:
         -----------
-        total_timesteps : int
-            Total environment steps
         training_config : TrainingConfig, optional
             Training configuration object
+        total_timesteps : int, optional
+            Total environment steps
         eval_freq : int
             Evaluate every N steps
         eval_episodes : int
@@ -920,11 +920,11 @@ class RainbowAgent(BaseAgent):
             Environment for evaluation
         callbacks : list, optional
             Callbacks (not used, for interface compatibility)
-        
+
         Returns:
         --------
-        dict
-            Training history with losses and rewards
+        TrainingMetrics
+            Training history and performance metrics
         """
         # Handle training_config if provided
         if training_config is not None:
@@ -933,71 +933,68 @@ class RainbowAgent(BaseAgent):
             eval_episodes = training_config.n_eval_episodes
             save_freq = training_config.save_freq
             save_path = save_path or training_config.save_path
-        
+
         # Default total_timesteps if still None
         if total_timesteps is None:
             total_timesteps = 100_000
-        history = {
-            "losses": [],
-            "episode_rewards": [],
-            "eval_rewards": [],
-        }
-        
+
         state, _ = self.env.reset()
         episode_reward = 0
-        
+
         try:
             from tqdm import tqdm
             iterator = tqdm(range(total_timesteps), disable=not progress_bar)
         except ImportError:
             iterator = range(total_timesteps)
-        
+
         for step in iterator:
             # Select and execute action
             action = self.select_action(state, training=True)
             next_state, reward, terminated, truncated, info = self.env.step(action)
             done = terminated or truncated
-            
+
             # Get regime if available
             regime = info.get("regime", None)
-            
+
             # Store experience
             self.store_experience(state, action, reward, next_state, done, regime)
-            
+
             episode_reward += reward
-            
+
             # Update
             if step % self.config.get("train_freq", 4) == 0:
                 loss = self.update()
                 if loss is not None:
-                    history["losses"].append(loss)
-            
+                    self.metrics.policy_losses.append(loss)
+
             # Episode end
             if done:
-                history["episode_rewards"].append(episode_reward)
+                self.metrics.episode_rewards.append(episode_reward)
                 self.episodes += 1
                 state, _ = self.env.reset()
                 episode_reward = 0
             else:
                 state = next_state
-            
+
             # Evaluation
             if step > 0 and step % eval_freq == 0:
                 eval_reward = self._evaluate(eval_episodes)
-                history["eval_rewards"].append(eval_reward)
-                
+                self.metrics.eval_rewards.append(eval_reward)
+                self.metrics.timesteps.append(self.total_timesteps + step)
+
                 if progress_bar and hasattr(iterator, 'set_postfix'):
                     iterator.set_postfix({
                         "ep": self.episodes,
                         "reward": f"{eval_reward:.2f}",
-                        "loss": f"{history['losses'][-1]:.4f}" if history["losses"] else "N/A"
+                        "loss": f"{self.metrics.policy_losses[-1]:.4f}" if self.metrics.policy_losses else "N/A"
                     })
-            
+
             # Save checkpoint
             if save_path and step > 0 and step % save_freq == 0:
                 self.save(f"{save_path}/rainbow_step_{step}")
-        
-        return history
+
+        self.total_timesteps += total_timesteps
+        return self.metrics
     
     def _evaluate(self, n_episodes: int) -> float:
         """Evaluate without exploration."""
