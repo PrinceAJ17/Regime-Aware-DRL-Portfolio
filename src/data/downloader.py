@@ -344,24 +344,7 @@ def download_multiple_tickers(
     This function downloads each ticker separately, which is slightly slower
     than downloading all at once, but gives us better error handling and
     cleaner data structures.
-    
-    Parameters
-    ----------
-    tickers : List[str]
-        List of ticker symbols to download.
-    start_date : str
-        Start date in 'YYYY-MM-DD' format.
-    end_date : str
-        End date in 'YYYY-MM-DD' format.
-    progress : bool
-        Whether to show progress information.
-    
-    Returns
-    -------
-    Dict[str, pd.DataFrame]
-        Dictionary mapping ticker symbols to their DataFrames.
-        Tickers that failed to download are not included.
-    
+
     Example
     -------
     >>> tickers = ['SPY', 'QQQ', 'TLT']
@@ -373,23 +356,58 @@ def download_multiple_tickers(
     TLT: 253 days
     """
     results = {}
-    
+    #This dictionary would store successful downloads, it would start empty and add to it as each download succeeds.
+
     for i, ticker in enumerate(tickers):
         if progress:
             print(f"Downloading {ticker} ({i+1}/{len(tickers)})...")
-        
+        #This loop would loop through the ticker symbols while having the enumerate function giving both an index and a value in a loop. We need the index for progress reporting. 
+
+        """"
+            tickers = ['SPY', 'QQQ', 'TLT']
+
+            # Without enumerate:
+            for ticker in tickers:
+                print(ticker)
+            # Output: SPY, QQQ, TLT (no index)
+
+            # With enumerate:
+            for i, ticker in enumerate(tickers):
+                print(f"{i}: {ticker}")
+            # Output: 0: SPY, 1: QQQ, 2: TLT (with index)
+        """
         df = download_single_ticker(
             ticker=ticker,
             start_date=start_date,
             end_date=end_date,
-            progress=False  # Don't show individual progress bars
+            progress=False  # Don't show individual progress bars from yfinance
         )
-        
+        """
+            Parameters
+            ----------
+            tickers : List[str]
+                List of ticker symbols to download.
+            start_date : str
+                Start date in 'YYYY-MM-DD' format.
+            end_date : str
+                End date in 'YYYY-MM-DD' format.
+            progress : bool
+                Whether to show progress information.
+            
+            Returns
+            -------
+            Dict[str, pd.DataFrame]
+                Dictionary mapping ticker symbols to their DataFrames.
+                Tickers that failed to download are not included.
+        """
         if df is not None:
             results[ticker] = df
         else:
             logger.warning(f"Skipping {ticker} due to download failure")
-    
+        # Here we are calling our download_single_ticker function. 
+        # What happens here is that once the function is called, the ticker's entire OHLCV information would be copied into the dataframe "df". 
+        # This dataframe would they become the value in the key-pair value for that particular ticker in the dictionary "results". 
+        # If the download is not successful maybe because of an incorrect ticker symbol then the function would return an error and move on to the next. 
     # Report summary
     successful = len(results)
     failed = len(tickers) - successful
