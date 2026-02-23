@@ -157,32 +157,45 @@ class RegimeAwareReplayBufferWrapper:
         regime_aware_buffer,
         regime_detector,
         env: gym.Env,
+        price_data=None,
         strategy: str = "balanced"
     ):
         """
         Initialize the wrapper.
-        
+
         Parameters:
         -----------
         regime_aware_buffer : RegimeAwareReplayBuffer
             Your custom regime-aware buffer
-            
+
         regime_detector : UnifiedRegimeDetector
             For detecting current market regime
-            
+
         env : gym.Env
             The environment (needed for observation/action spaces)
-            
+
+        price_data : pd.DataFrame or Dict, optional
+            Price data for regime detection
+
         strategy : str
             Sampling strategy to use
         """
         self.buffer = regime_aware_buffer
         self.regime_detector = regime_detector
         self.env = env
+        self.price_data = price_data
         self.strategy = strategy
-        
+
         # Track current regime (updated during training)
         self.current_regime = None
+
+        # Cache regime series to avoid recomputing on every step
+        self._regime_cache = None
+        if price_data is not None and regime_detector is not None:
+            try:
+                self._regime_cache = regime_detector.detect(price_data)
+            except Exception:
+                self._regime_cache = None
         
         # For SB3 compatibility
         self.observation_space = env.observation_space
@@ -191,7 +204,13 @@ class RegimeAwareReplayBufferWrapper:
         self.optimize_memory_usage = False
         
         # Buffer properties
-        self.buffer_size = regime_aware_buffer.buffer_size
+        # Handle both possible attribute names
+        if hasattr(regime_aware_buffer, 'buffer_size'):
+            self.buffer_size = regime_aware_buffer.buffer_size
+        elif hasattr(regime_aware_buffer, 'total_buffer_size'):
+            self.buffer_size = regime_aware_buffer.total_buffer_size
+        else:
+            self.buffer_size = 1_000_000  # Default fallback
         self.pos = 0
         self.full = False
     
@@ -206,25 +225,41 @@ class RegimeAwareReplayBufferWrapper:
     ):
         """
         Add experience to buffer (SB3 interface).
-        
+
         This is called by SB3 after each environment step.
         We detect the current regime and pass it to your buffer.
         """
-        # Detect regime (use info from environment if available)
-        if infos and len(infos) > 0 and 'regime' in infos[0]:
-            # Environment provides regime directly
-            regime_str = infos[0]['regime']
-        elif self.current_regime is not None:
-            # Use cached regime
-            regime_str = self.current_regime
-        else:
-            # Default to sideways
-            regime_str = 'sideways'
-        
-        # Convert string to enum
         from ..replay.regime_aware_buffer import MarketRegime
+
+        # Determine regime - try multiple methods
+        regime_str = 'sideways'  # Default fallback
+
+        # Method 1: Check if environment provides regime in info
+        if infos and len(infos) > 0 and 'regime' in infos[0]:
+            regime_str = infos[0]['regime']
+
+        # Method 2: Use cached regime series + env step index
+        elif self._regime_cache is not None:
+            try:
+                current_step = self._get_env_step()
+                if current_step is not None and 0 <= current_step < len(self._regime_cache):
+                    regime_val = self._regime_cache.iloc[current_step]
+                    regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+                else:
+                    # Step out of range, use last known regime
+                    regime_val = self._regime_cache.iloc[-1]
+                    regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+            except Exception:
+                if self.current_regime is not None:
+                    regime_str = self.current_regime
+
+        # Method 3: Use cached regime from callback
+        elif self.current_regime is not None:
+            regime_str = self.current_regime
+
+        # Convert string to enum
         regime = MarketRegime(regime_str)
-        
+
         # Add to your buffer
         self.buffer.add(
             state=obs.flatten() if obs.ndim > 1 else obs,
@@ -234,10 +269,24 @@ class RegimeAwareReplayBufferWrapper:
             done=bool(done),
             regime=regime
         )
-        
+
         # Update position tracking (for SB3 compatibility)
         self.pos = len(self.buffer)
         self.full = self.buffer.is_full()
+
+    def _get_env_step(self) -> Optional[int]:
+        """Get the current step index from the environment."""
+        env = self.env
+        # Try direct attribute
+        if hasattr(env, 'current_step'):
+            return env.current_step
+        # VecEnv wrapped
+        if hasattr(env, 'envs') and hasattr(env.envs[0], 'current_step'):
+            return env.envs[0].current_step
+        # Unwrapped
+        if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'current_step'):
+            return env.unwrapped.current_step
+        return None
     
     def sample(self, batch_size: int, env=None) -> 'ReplayBufferSamples':
         """
@@ -255,7 +304,6 @@ class RegimeAwareReplayBufferWrapper:
         # Sample using your regime-aware buffer!
         batch = self.buffer.sample(
             batch_size=batch_size,
-            strategy=self.strategy,
             current_regime=current_regime
         )
         
@@ -312,31 +360,63 @@ class RegimeTrackingCallback(BaseCallback):
         replay_wrapper: RegimeAwareReplayBufferWrapper,
         regime_detector,
         env,
+        price_data=None,
         verbose: int = 0
     ):
         super().__init__(verbose)
         self.replay_wrapper = replay_wrapper
         self.regime_detector = regime_detector
         self.env = env
-        
+        self.price_data = price_data
+
+        # Cache regime series to avoid recomputing on every step
+        self._regime_cache = None
+        if price_data is not None and regime_detector is not None:
+            try:
+                self._regime_cache = regime_detector.detect(price_data)
+            except Exception:
+                self._regime_cache = None
+
         # Tracking
         self.regime_counts = {'bull': 0, 'bear': 0, 'sideways': 0}
-    
+
     def _on_step(self) -> bool:
         """Called after each environment step."""
-        # Get current data from environment
-        if hasattr(self.env, 'get_current_data'):
-            current_data = self.env.get_current_data()
-            regime = self.regime_detector.detect_current(current_data)
-        else:
-            regime = 'sideways'
-        
+        regime = 'sideways'  # Default
+
+        try:
+            # Unwrap environment to access current_step
+            env = self.env
+            if hasattr(env, 'envs'):
+                env = env.envs[0]
+            if hasattr(env, 'unwrapped'):
+                env = env.unwrapped
+
+            current_step = getattr(env, 'current_step', None)
+
+            # Use cached regime series if available
+            if self._regime_cache is not None and current_step is not None:
+                if 0 <= current_step < len(self._regime_cache):
+                    regime_val = self._regime_cache.iloc[current_step]
+                    regime = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+
+            # Fallback: try to get price data from env and detect
+            elif self.regime_detector is not None:
+                price_data = getattr(env, 'price_data', None) or getattr(env, '_price_data', None)
+                if price_data is not None and current_step is not None:
+                    regime = self.regime_detector.detect_at_index(price_data, current_step)
+                elif price_data is not None:
+                    regime = self.regime_detector.detect_current(price_data)
+
+        except Exception:
+            pass  # Keep default 'sideways'
+
         # Update wrapper
         self.replay_wrapper.set_current_regime(regime)
-        
+
         # Track counts
         self.regime_counts[regime] += 1
-        
+
         return True
     
     def _on_training_end(self):
@@ -472,6 +552,7 @@ class SACAgent(BaseAgent):
                 regime_aware_buffer=self.replay_buffer,
                 regime_detector=self.regime_detector,
                 env=self.env,
+                price_data=self._get_price_data_from_env(),
                 strategy=self.sac_config.replay_strategy
             )
             
@@ -482,12 +563,31 @@ class SACAgent(BaseAgent):
         else:
             self.replay_wrapper = None
             self._log("Using standard uniform replay buffer")
-    
+
+    def _get_price_data_from_env(self):
+        """Extract price data from environment for regime detection."""
+        env = self.env
+
+        # Unwrap if needed
+        if hasattr(env, 'envs'):
+            env = env.envs[0]
+        if hasattr(env, 'unwrapped'):
+            env = env.unwrapped
+
+        # Try different attribute names
+        for attr in ('price_data', '_price_data', 'data', 'df'):
+            if hasattr(env, attr):
+                return getattr(env, attr)
+
+        return None
+
     def train(
         self,
         training_config: TrainingConfig,
+        total_timesteps: int = None,  # ADD THIS
         eval_env: Optional[gym.Env] = None,
-        callbacks: Optional[List] = None
+        callbacks: Optional[List] = None,
+        progress_bar: bool = True,  # ADD THIS
     ) -> TrainingMetrics:
         """
         Train the SAC agent.
@@ -513,12 +613,18 @@ class SACAgent(BaseAgent):
         # Set up callbacks
         callback_list = callbacks or []
         
+        # Handle direct total_timesteps argument
+        if training_config is None and total_timesteps is not None:
+            training_config = TrainingConfig(total_timesteps=total_timesteps)
+        elif training_config is None:
+            training_config = TrainingConfig()
         # Add regime tracking callback if using regime-aware replay
         if self.replay_wrapper is not None:
             regime_callback = RegimeTrackingCallback(
                 replay_wrapper=self.replay_wrapper,
                 regime_detector=self.regime_detector,
                 env=self.env,
+                price_data=self._get_price_data_from_env(),
                 verbose=self.verbose
             )
             callback_list.append(regime_callback)

@@ -645,6 +645,16 @@ class RegimeAwareReplayBuffer:
             'regimes': regime_indices  # 0=bull, 1=bear, 2=sideways
         }
     
+    def is_full(self) -> bool:
+        """Check if buffer is full (for SB3 compatibility)."""
+        return len(self) >= self.total_buffer_size
+
+    @property
+    def buffer_size(self) -> int:
+        """Alias for total_buffer_size (for SB3 compatibility)."""
+        return self.total_buffer_size
+
+
     def __len__(self) -> int:
         """Total experiences across all regime buffers."""
         return sum(len(buf) for buf in self._regime_buffers.values())

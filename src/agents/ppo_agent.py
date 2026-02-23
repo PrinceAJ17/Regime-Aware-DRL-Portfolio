@@ -417,7 +417,9 @@ class PPOAgent(BaseAgent):
         self,
         training_config: TrainingConfig,
         eval_env: Optional[gym.Env] = None,
-        callbacks: Optional[List] = None
+        total_timesteps: int = None,  # ADD THIS
+        callbacks: Optional[List] = None,
+        progress_bar: bool = True,  # ADD THIS
     ) -> TrainingMetrics:
         """
         Train the PPO agent.
@@ -443,6 +445,12 @@ class PPOAgent(BaseAgent):
         # Set up callbacks
         callback_list = callbacks or []
         
+        # Handle direct total_timesteps argument
+        if training_config is None and total_timesteps is not None:
+            training_config = TrainingConfig(total_timesteps=total_timesteps)
+        elif training_config is None:
+            training_config = TrainingConfig()
+
         # Add regime metrics callback if tracking
         if self.ppo_config.track_regime_metrics and self.regime_detector is not None:
             self.regime_callback = RegimeMetricsCallback(

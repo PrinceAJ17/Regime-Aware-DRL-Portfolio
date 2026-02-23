@@ -358,7 +358,7 @@ class RuleBasedRegimeDetector:
     
     def detect(
         self, 
-        price_data: pd.DataFrame,
+        price_data,
         price_column: str = 'close'
     ) -> pd.Series:
         """
@@ -393,8 +393,24 @@ class RuleBasedRegimeDetector:
         SIDEWAYS    150
         BEAR        100
         """
-        prices = price_data[price_column]
+        if isinstance(price_data, dict):
+            if 'SPY' in price_data:
+                price_data = price_data['SPY']
+            else:
+                price_data = list(price_data.values())[0]
         
+        # Handle column name variants (Close vs close vs Adj Close)
+        actual_col = None
+        for col in [price_column, 'Close', 'close', 'Adj Close', 'adj_close']:
+            if col in price_data.columns:
+                actual_col = col
+                break
+        
+        if actual_col is None:
+            raise KeyError(f"No price column found. Available: {list(price_data.columns)}")
+        
+        prices = price_data[actual_col]
+             
         # Step 1: Calculate indicators
         sma_short = self._calculate_sma(prices, self.config.sma_short_period)
         sma_long = self._calculate_sma(prices, self.config.sma_long_period)

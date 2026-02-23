@@ -195,6 +195,9 @@ class TradingEnvironment(gym.Env):
         
         # Process and align data
         self._prepare_data(price_data, feature_data)
+
+        # Expose price_data for external access (e.g., regime detection)
+        self.price_data = price_data 
         
         # Define observation and action spaces
         self._define_spaces()
