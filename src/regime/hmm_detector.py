@@ -71,7 +71,7 @@ from dataclasses import dataclass
 import warnings
 
 # Import from our rule-based module for consistency
-from rule_based_detector import MarketRegime, RegimeDetectionConfig
+from src.regime.rule_based_detector import MarketRegime, RegimeDetectionConfig
 
 # HMM library - if not installed, provide helpful error
 try:

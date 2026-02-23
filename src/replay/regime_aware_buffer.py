@@ -66,7 +66,7 @@ import random
 # Import from our other modules
 import sys
 sys.path.append('..')
-from standard_buffer import Experience
+from src.replay.standard_buffer import Experience
 
 
 class SamplingStrategy(Enum):
