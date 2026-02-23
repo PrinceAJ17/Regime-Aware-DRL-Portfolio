@@ -1,141 +1,75 @@
 """
-RL Agents Module
-================
+RL Agents for Portfolio Management.
 
-This module contains all reinforcement learning agent implementations.
+This module provides wrappers around reinforcement learning algorithms
+for use in portfolio optimization with regime-aware experience replay.
 
-IMPLEMENTED ALGORITHMS:
-=======================
+Agents:
+-------
+- PPOAgent: Proximal Policy Optimization (on-policy, stable)
+- SACAgent: Soft Actor-Critic (off-policy, sample-efficient)
+- TD3Agent: Twin Delayed DDPG (off-policy, stable)
+- RainbowAgent: Rainbow DQN (off-policy, discrete actions)
 
-Week 4 (PPO & SAC):
--------------------
-1. PPOAgent - Proximal Policy Optimization
-   - On-policy algorithm
-   - Regime-aware through observation augmentation
-   - Stable, widely-used baseline
+All agents support:
+- Custom replay buffers (including RegimeAwareReplayBuffer)
+- Checkpointing and model loading
+- TensorBoard logging
+- Evaluation and comparison
 
-2. SACAgent - Soft Actor-Critic  
-   - Off-policy algorithm
-   - DIRECTLY uses your RegimeAwareReplayBuffer!
-   - Maximum entropy for exploration
+Usage:
+------
+>>> from src.agents import PPOAgent, SACAgent, TD3Agent, RainbowAgent
+>>> 
+>>> # For continuous actions (PPO, SAC, TD3)
+>>> agent = SACAgent(trading_env, replay_buffer=regime_aware_buffer)
+>>> agent.train(total_timesteps=1_000_000)
+>>> 
+>>> # For discrete actions (Rainbow)
+>>> from src.agents.rainbow_agent import DiscreteActionWrapper
+>>> discrete_env = DiscreteActionWrapper(trading_env)
+>>> agent = RainbowAgent(discrete_env, replay_buffer=regime_aware_buffer)
+>>> agent.train(total_timesteps=1_000_000)
 
-Week 5 (TD3 & Rainbow) - To be implemented:
--------------------------------------------
-3. TD3Agent - Twin Delayed DDPG
-   - Off-policy, continuous actions
-   - Uses your RegimeAwareReplayBuffer
-
-4. RainbowAgent - Rainbow DQN
-   - Off-policy, discrete actions
-   - Combines multiple DQN improvements
-   - Needs integration with PER + regime-awareness
-
-YOUR NOVEL CONTRIBUTION:
-========================
-
-The key innovation is how each algorithm interfaces with your 
-regime-aware replay buffer:
-
-| Algorithm | Replay Type | Regime Integration |
-|-----------|-------------|-------------------|
-| PPO       | Rollout     | Observation augmentation |
-| SAC       | Replay      | RegimeAwareReplayBuffer |
-| TD3       | Replay      | RegimeAwareReplayBuffer |
-| Rainbow   | PER         | Regime + Priority sampling |
-
-USAGE EXAMPLES:
-===============
-
-# SAC with regime-aware replay (recommended for your research)
->>> from src.agents import SACAgent, SACConfig
->>> from src.replay import RegimeAwareReplayBuffer
->>> from src.regime import UnifiedRegimeDetector
->>>
->>> env = TradingEnv(...)
->>> detector = UnifiedRegimeDetector(method='rule_based')
->>> buffer = RegimeAwareReplayBuffer(buffer_size=100000, strategy='balanced')
->>>
->>> agent = SACAgent(
-...     env=env,
-...     regime_detector=detector,
-...     replay_buffer=buffer,
-...     sac_config=SACConfig(replay_strategy='balanced')
-... )
->>> agent.train(TrainingConfig(total_timesteps=100000))
-
-# PPO with regime-augmented observations
->>> from src.agents import PPOAgent, PPOConfig
->>>
->>> agent = PPOAgent(
-...     env=env,
-...     regime_detector=detector,
-...     ppo_config=PPOConfig(add_regime_to_obs=True)
-... )
->>> agent.train(TrainingConfig(total_timesteps=100000))
-
-# Factory functions for quick setup
->>> from src.agents import create_sac_agent, create_ppo_agent
->>>
->>> sac = create_sac_agent(env, use_regime_aware=True, replay_strategy='inverse_frequency')
->>> ppo = create_ppo_agent(env, add_regime_to_obs=True)
-
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
+Project: Regime-Aware Experience Replay for DRL Portfolio Management
 """
 
-# Base classes and configs
-from .base_agent import (
-    BaseAgent,
-    TrainingConfig,
-    TrainingMetrics
-)
-
-# PPO Agent
-from .ppo_agent import (
-    PPOAgent,
-    PPOConfig,
-    RegimeObservationWrapper,
-    RegimeMetricsCallback,
-    create_ppo_agent
-)
-
-# SAC Agent
-from .sac_agent import (
-    SACAgent,
-    SACConfig,
-    RegimeAwareReplayBufferWrapper,
-    RegimeTrackingCallback,
-    create_sac_agent
-)
-
-# Convenience: all agents
-AVAILABLE_AGENTS = {
-    'ppo': PPOAgent,
-    'sac': SACAgent,
-    # 'td3': TD3Agent,  # Week 5
-    # 'rainbow': RainbowAgent,  # Week 5
-}
+from .base_agent import BaseAgent, ReplayBufferWrapper
+from .ppo_agent import PPOAgent
+from .sac_agent import SACAgent
+from .td3_agent import TD3Agent
+from .rainbow_agent import RainbowAgent, DiscreteActionWrapper
 
 __all__ = [
-    # Base
-    'BaseAgent',
-    'TrainingConfig',
-    'TrainingMetrics',
+    # Base class
+    "BaseAgent",
+    "ReplayBufferWrapper",
     
-    # PPO
-    'PPOAgent',
-    'PPOConfig',
-    'RegimeObservationWrapper',
-    'RegimeMetricsCallback',
-    'create_ppo_agent',
+    # Continuous action agents
+    "PPOAgent",
+    "SACAgent", 
+    "TD3Agent",
     
-    # SAC
-    'SACAgent',
-    'SACConfig',
-    'RegimeAwareReplayBufferWrapper',
-    'RegimeTrackingCallback',
-    'create_sac_agent',
-    
-    # Registry
-    'AVAILABLE_AGENTS',
+    # Discrete action agents
+    "RainbowAgent",
+    "DiscreteActionWrapper",
 ]
+
+# Agent registry for easy iteration
+AGENTS = {
+    "ppo": PPOAgent,
+    "sac": SACAgent,
+    "td3": TD3Agent,
+    "rainbow": RainbowAgent,
+}
+
+# Agents that use replay buffers (benefit from regime-aware replay)
+REPLAY_BUFFER_AGENTS = ["sac", "td3", "rainbow"]
+
+# Agents that need continuous actions
+CONTINUOUS_AGENTS = ["ppo", "sac", "td3"]
+
+# Agents that need discrete actions
+DISCRETE_AGENTS = ["rainbow"]

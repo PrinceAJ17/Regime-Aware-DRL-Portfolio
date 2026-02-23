@@ -577,6 +577,168 @@ class BaseAgent(ABC):
             print(f"[{self.name}] {message}")
 
 
+class ReplayBufferWrapper:
+    """
+    Wrapper to make RegimeAwareReplayBuffer compatible with Stable Baselines 3.
+    
+    SB3 expects replay buffers to have specific methods and return formats.
+    This wrapper adapts our RegimeAwareReplayBuffer to work with SB3's
+    off-policy algorithms (SAC, TD3).
+    
+    Why this is needed:
+    -------------------
+    SB3's replay buffer returns samples as a named tuple with specific fields.
+    Our RegimeAwareReplayBuffer returns a dictionary.
+    This wrapper translates between the two formats.
+    
+    Usage:
+    ------
+    >>> from src.replay.regime_aware_buffer import RegimeAwareReplayBuffer
+    >>> regime_buffer = RegimeAwareReplayBuffer(buffer_size=100000, strategy='balanced')
+    >>> wrapped = ReplayBufferWrapper(regime_buffer, env.observation_space, env.action_space)
+    >>> # Now use wrapped as SB3's replay buffer
+    """
+    
+    def __init__(
+        self,
+        regime_buffer,
+        observation_space,
+        action_space,
+        device: str = "cpu",
+        n_envs: int = 1,
+    ):
+        """
+        Initialize the wrapper.
+        
+        Parameters:
+        -----------
+        regime_buffer : RegimeAwareReplayBuffer
+            Your custom regime-aware replay buffer
+        observation_space : spaces.Space
+            Environment's observation space
+        action_space : spaces.Space
+            Environment's action space
+        device : str
+            Device for tensors ("cpu" or "cuda")
+        n_envs : int
+            Number of parallel environments (usually 1)
+        """
+        self.regime_buffer = regime_buffer
+        self.observation_space = observation_space
+        self.action_space = action_space
+        self.device = device
+        self.n_envs = n_envs
+        
+        # SB3 expects these attributes
+        # Handle both possible attribute names (buffer_size or total_buffer_size)
+        if hasattr(regime_buffer, 'buffer_size'):
+            self.buffer_size = regime_buffer.buffer_size
+        elif hasattr(regime_buffer, 'total_buffer_size'):
+            self.buffer_size = regime_buffer.total_buffer_size
+        else:
+            self.buffer_size = 1_000_000  # Default fallback
+        self.pos = 0
+        self.full = False
+        
+        # Track current regime for sampling
+        self._current_regime = None
+    
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: list,
+    ) -> None:
+        """
+        Add experience to buffer (SB3 format).
+        
+        SB3 calls this method during training. We translate to our format
+        and add to the regime-aware buffer.
+        """
+        # Get regime from info if available, otherwise use stored current regime
+        regime = None
+        if infos and len(infos) > 0 and isinstance(infos[0], dict):
+            regime = infos[0].get('regime', self._current_regime)
+        
+        if regime is None:
+            regime = self._current_regime
+        
+        # Handle batched inputs (n_envs > 1)
+        if len(obs.shape) > 1:
+            for i in range(obs.shape[0]):
+                self.regime_buffer.add(
+                    state=obs[i],
+                    action=action[i],
+                    reward=float(reward[i]),
+                    next_state=next_obs[i],
+                    done=bool(done[i]),
+                    regime=regime,
+                )
+        else:
+            self.regime_buffer.add(
+                state=obs,
+                action=action,
+                reward=float(reward),
+                next_state=next_obs,
+                done=bool(done),
+                regime=regime,
+            )
+        
+        # Update position tracking for SB3
+        self.pos = len(self.regime_buffer) % self.buffer_size
+        self.full = len(self.regime_buffer) >= self.buffer_size
+    
+    def sample(self, batch_size: int, env=None):
+        """
+        Sample a batch of experiences (SB3 format).
+        
+        Returns a ReplayBufferSamples named tuple that SB3 expects.
+        """
+        import torch
+        from stable_baselines3.common.buffers import ReplayBufferSamples
+        
+        # Sample from regime-aware buffer
+        batch = self.regime_buffer.sample(
+            batch_size=batch_size,
+            current_regime=self._current_regime,
+        )
+        
+        # Convert to tensors
+        observations = torch.as_tensor(batch['states'], device=self.device).float()
+        actions = torch.as_tensor(batch['actions'], device=self.device).float()
+        next_observations = torch.as_tensor(batch['next_states'], device=self.device).float()
+        dones = torch.as_tensor(batch['dones'], device=self.device).float().unsqueeze(1)
+        rewards = torch.as_tensor(batch['rewards'], device=self.device).float().unsqueeze(1)
+        
+        return ReplayBufferSamples(
+            observations=observations,
+            actions=actions,
+            next_observations=next_observations,
+            dones=dones,
+            rewards=rewards,
+        )
+    
+    def set_current_regime(self, regime) -> None:
+        """Set the current market regime for sampling."""
+        self._current_regime = regime
+    
+    def size(self) -> int:
+        """Return current buffer size."""
+        return len(self.regime_buffer)
+    
+    def __len__(self) -> int:
+        """Return current buffer size."""
+        return len(self.regime_buffer)
+    
+    def reset(self) -> None:
+        """Reset the buffer."""
+        self.regime_buffer.clear()
+        self.pos = 0
+        self.full = False
+
 # =============================================================================
 # TESTING
 # =============================================================================
