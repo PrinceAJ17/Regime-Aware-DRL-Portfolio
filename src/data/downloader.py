@@ -552,7 +552,51 @@ def load_from_cache(
 # =============================================================================
 # MAIN PUBLIC FUNCTION
 # =============================================================================
-
+# =============================================================================
+# FLOW DIAGRAM FOR download_ohlcv_data()
+# =============================================================================
+#
+# download_ohlcv_data(['SPY', 'QQQ', 'TLT'], '2020-01-01', '2023-12-31')
+#         │
+#         ▼
+# ┌─────────────────────────────────────────────────────────┐
+# │ STEP 1: Check each ticker's cache                       │
+# │   SPY: Cache exists, fresh     → Use cache              │
+# │   QQQ: Cache exists, expired   → Need to download       │
+# │   TLT: No cache                → Need to download       │
+# │   cached_tickers = ['SPY']                              │
+# │   tickers_to_download = ['QQQ', 'TLT']                  │
+# └─────────────────────────────────────────────────────────┘
+#         │
+#         ▼
+# ┌─────────────────────────────────────────────────────────┐
+# │ STEP 2: Load cached data                                │
+# │   cached_data = load_from_cache(['SPY'])                │
+# │   cached_data = {'SPY': DataFrame}                      │
+# └─────────────────────────────────────────────────────────┘
+#         │
+#         ▼
+# ┌─────────────────────────────────────────────────────────┐
+# │ STEP 3: Download missing data                           │
+# │   downloaded_data = download_multiple_tickers(          │
+# │       ['QQQ', 'TLT'], '2020-01-01', '2023-12-31')       │
+# │   downloaded_data = {'QQQ': DataFrame, 'TLT': DataFrame}│
+# │   save_to_cache(downloaded_data)                        │
+# └─────────────────────────────────────────────────────────┘
+#         │
+#         ▼
+# ┌─────────────────────────────────────────────────────────┐
+# │ STEP 4: Combine everything                              │
+# │   all_data = {**cached_data, **downloaded_data}         │
+# │   all_data = {'SPY': df, 'QQQ': df, 'TLT': df}         │
+# └─────────────────────────────────────────────────────────┘
+#         │
+#         ▼
+# ┌─────────────────────────────────────────────────────────┐
+# │ STEP 5: Print summary and return all_data               │
+# └─────────────────────────────────────────────────────────┘
+#
+# =============================================================================
 def download_ohlcv_data(
     tickers: List[str],
     start_date: str,
