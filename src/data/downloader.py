@@ -692,7 +692,7 @@ def download_ohlcv_data(
         downloaded_data = {}
     
     # Combine cached and downloaded data
-    all_data = {**cached_data, **downloaded_data}
+    all_data = {**cached_data, **downloaded_data} #The ** operator "unpacks" a dictionary. So this combines all the data together. Merging two dictionaries into 1.
     
     # Report what we ended up with
     print(f"\n{'='*50}")
@@ -702,7 +702,7 @@ def download_ohlcv_data(
     for ticker in tickers:
         if ticker in all_data:
             df = all_data[ticker]
-            print(f"{ticker}: {len(df):,} trading days "
+            print(f"{ticker}: {len(df):,} trading days " #The :, adds commas to large numbers: 1006 becomes 1,006 1000000 becomes 1,000,000
                   f"({df.index.min().date()} to {df.index.max().date()})")
         else:
             print(f"{ticker}: FAILED TO LOAD")
