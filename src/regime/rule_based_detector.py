@@ -39,7 +39,7 @@ REGIME RULES:
 - BEAR: SMA-50 < SMA-200 AND Volatility > 75th percentile
 - SIDEWAYS: Everything else (transitions, uncertain periods)
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 Project: Regime-Aware Experience Replay for DRL Portfolio Management
 """

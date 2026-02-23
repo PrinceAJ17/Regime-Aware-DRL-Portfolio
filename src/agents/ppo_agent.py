@@ -49,7 +49,7 @@ References:
 [10] Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O. (2017). 
      Proximal policy optimization algorithms. arXiv:1707.06347.
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 

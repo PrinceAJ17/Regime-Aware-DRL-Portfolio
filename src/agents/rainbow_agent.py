@@ -65,7 +65,7 @@ Usage:
 >>> agent = RainbowAgent(discrete_env, replay_buffer=regime_aware_buffer)
 >>> agent.train(total_timesteps=1_000_000)
 
-Author: [Your Name]  
+Author: Prince Alexander John  
 Date: February 2026
 Project: Regime-Aware Experience Replay for DRL Portfolio Management
 """

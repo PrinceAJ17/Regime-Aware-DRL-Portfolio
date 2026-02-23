@@ -57,7 +57,7 @@ to be non-uniform based on market regimes.
 
 To prove our method is better, we need to compare against this baseline.
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 

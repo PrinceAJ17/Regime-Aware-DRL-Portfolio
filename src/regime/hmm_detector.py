@@ -59,7 +59,7 @@ HOW HMM WORKS (Simplified):
    Given observations, compute most likely sequence of states
    Uses "Viterbi algorithm" or "forward-backward algorithm"
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 Project: Regime-Aware Experience Replay for DRL Portfolio Management
 """

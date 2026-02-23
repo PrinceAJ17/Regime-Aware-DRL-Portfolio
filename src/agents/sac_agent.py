@@ -51,7 +51,7 @@ References:
      Soft actor-critic: Off-policy maximum entropy deep reinforcement learning.
      ICML 2018.
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 

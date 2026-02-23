@@ -34,7 +34,7 @@ WHAT THIS BASE CLASS PROVIDES:
 4. Metrics tracking
 5. Integration points for your regime-aware replay buffer
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 

@@ -32,7 +32,7 @@ Usage:
 >>> agent.train(total_timesteps=1_000_000)
 >>> agent.save("models/td3_regime_aware")
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 Project: Regime-Aware Experience Replay for DRL Portfolio Management
 """

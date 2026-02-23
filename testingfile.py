@@ -13,7 +13,7 @@ WHAT THIS VERIFIES:
 
 Run this after all 8 tests pass to confirm real integration.
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 

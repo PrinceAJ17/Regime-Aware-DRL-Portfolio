@@ -52,7 +52,7 @@ THE FOUR SAMPLING STRATEGIES:
    - Formula: P(regime) ∝ mean(TD_error in regime)
    - Hypothesis: Focus learning where the agent is struggling
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 Project: Regime-Aware Experience Replay for DRL Portfolio Management
 """
