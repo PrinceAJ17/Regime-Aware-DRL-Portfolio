@@ -1,23 +1,28 @@
 """
-Week 5 Testing File - TD3 & Rainbow DQN Agents
+Integration Test Script - Week 5.5
+==================================
 
-Run this file to verify that your Week 5 implementations work correctly.
-This tests both TD3 and Rainbow DQN agents with standard and regime-aware replay.
+This script verifies that all your components work together:
+1. Data loading
+2. Feature calculation
+3. Trading environment
+4. All 4 RL algorithms (PPO, SAC, TD3, Rainbow)
+5. Regime-aware replay buffer
+
+Run this BEFORE starting Week 6 experiments to catch any integration issues.
 
 Usage:
 ------
-python test_week5.py
+python integration_test.py
 
-Expected Output:
-----------------
-All 6 tests should pass with ✓ marks.
+Expected time: ~10-15 minutes (CPU)
 
 Author: [Your Name]
 Date: February 2026
 """
 
-import numpy as np
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -25,304 +30,448 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-
-def test_td3_basic():
-    """Test 1: TD3 agent creation and basic functionality."""
-    print("\n" + "=" * 60)
-    print("TEST 1: TD3 Basic Functionality")
-    print("=" * 60)
-    
-    import gymnasium as gym
-    from src.agents.td3_agent import TD3Agent
-    
-    # Create a simple continuous environment
-    env = gym.make("Pendulum-v1")
-    
-    # Create TD3 agent
-    print("Creating TD3 agent...")
-    agent = TD3Agent(env, verbose=0)
-    
-    print(f"  ✓ Agent created")
-    print(f"  Learning rate: {agent.config.get('learning_rate')}")
-    print(f"  Policy delay: {agent.config.get('policy_delay')}")
-    print(f"  Target noise: {agent.config.get('target_policy_noise')}")
-    
-    # Test prediction
-    obs, _ = env.reset()
-    action, _ = agent.predict(obs, deterministic=True)
-    print(f"  ✓ Prediction works (action shape: {action.shape})")
-    
-    # Quick training
-    print("  Training for 500 steps...")
-    agent.train(total_timesteps=500, progress_bar=False)
-    print(f"  ✓ Training completed")
-    
-    env.close()
-    print("\n✓ TEST 1 PASSED: TD3 basic functionality works!")
-    return True
+import numpy as np
+import warnings
+warnings.filterwarnings('ignore')
 
 
-def test_td3_with_regime_aware_replay():
-    """Test 2: TD3 with RegimeAwareReplayBuffer."""
-    print("\n" + "=" * 60)
-    print("TEST 2: TD3 with Regime-Aware Replay")
-    print("=" * 60)
+def print_header(title: str):
+    """Print a formatted header."""
+    print("\n" + "=" * 70)
+    print(f" {title}")
+    print("=" * 70)
+
+
+def print_step(step: str, status: str = ""):
+    """Print a step with optional status."""
+    if status:
+        print(f"  {step}: {status}")
+    else:
+        print(f"  {step}...")
+
+
+def test_data_loading():
+    """Test 1: Load market data."""
+    print_header("TEST 1: Data Loading")
     
-    import gymnasium as gym
-    from src.agents.td3_agent import TD3Agent
-    from src.replay.regime_aware_buffer import RegimeAwareReplayBuffer, SamplingStrategy
-    
-    # Create environment
-    env = gym.make("Pendulum-v1")
-    
-    # Create regime-aware buffer
-    print("Creating RegimeAwareReplayBuffer with balanced sampling...")
-    buffer = RegimeAwareReplayBuffer(
-        buffer_size=10000,
-        strategy=SamplingStrategy.BALANCED
-    )
-    
-    # Create TD3 with custom buffer
-    print("Creating TD3 agent with regime-aware replay...")
     try:
-        agent = TD3Agent(env, replay_buffer=buffer, verbose=1)
-        print(f"  ✓ TD3 created with RegimeAwareReplayBuffer")
+        from src.data.downloader import download_ohlcv_data
+        
+        print_step("Downloading data for SPY, QQQ, TLT, GLD, BIL (2020-2023)")
+        
+        # Use a shorter period for quick testing
+        data = download_ohlcv_data(
+            tickers=['SPY', 'QQQ', 'TLT', 'GLD', 'BIL'],
+            start_date='2020-01-01',
+            end_date='2023-12-31'
+        )
+        
+        print_step("Data loaded", f"✓ {len(data)} tickers")
+        
+        for ticker, df in data.items():
+            print_step(f"  {ticker}", f"{len(df)} days, columns: {list(df.columns)[:5]}...")
+        
+        print("\n✓ TEST 1 PASSED: Data loading works!")
+        return data
+        
     except Exception as e:
-        print(f"  ✗ Failed to create agent: {e}")
+        print(f"\n✗ TEST 1 FAILED: {e}")
         traceback.print_exc()
-        return False
+        return None
+
+
+def test_feature_calculation(price_data):
+    """Test 2: Calculate features."""
+    print_header("TEST 2: Feature Calculation")
     
-    # Quick training - with detailed error catching
-    print("  Training for 500 steps...")
+    if price_data is None:
+        print("  Skipping - no price data available")
+        return None
+    
     try:
-        agent.train(total_timesteps=500, progress_bar=False)
-        print(f"  ✓ Training with regime-aware replay completed")
+        from src.data.features import calculate_all_features
+        
+        print_step("Calculating technical features")
+        features = calculate_all_features(price_data)
+        
+        print_step("Features calculated", f"✓ {len(features)} tickers")
+        
+        for ticker, df in features.items():
+            valid_rows = (~df.isna().any(axis=1)).sum()
+            print_step(f"  {ticker}", f"{len(df.columns)} features, {valid_rows} valid rows")
+        
+        print("\n✓ TEST 2 PASSED: Feature calculation works!")
+        return features
+        
     except Exception as e:
-        print(f"  ✗ Training failed!")
-        print(f"  Exception type: {type(e).__name__}")
-        print(f"  Exception message: {e}")
+        print(f"\n✗ TEST 2 FAILED: {e}")
         traceback.print_exc()
+        return None
+
+
+def test_trading_environment(price_data, feature_data):
+    """Test 3: Create and test trading environment."""
+    print_header("TEST 3: Trading Environment")
+    
+    if price_data is None or feature_data is None:
+        print("  Skipping - missing data")
+        return None
+    
+    try:
+        from src.environment.trading_env import TradingEnvironment
+        
+        print_step("Creating TradingEnvironment")
+        env = TradingEnvironment(
+            price_data=price_data,
+            feature_data=feature_data,
+            episode_length=252,
+            random_start=True
+        )
+        
+        print_step("Environment created", "✓")
+        print_step(f"  Observation space", f"{env.observation_space.shape}")
+        print_step(f"  Action space", f"{env.action_space.shape}")
+        print_step(f"  Data length", f"{env.n_steps} days")
+        
+        # Test reset
+        print_step("Testing reset")
+        obs, info = env.reset()
+        print_step("  Reset", f"✓ obs shape: {obs.shape}")
+        
+        # Test a few steps
+        print_step("Testing 10 random steps")
+        total_reward = 0
+        for i in range(10):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            if terminated or truncated:
+                break
+        
+        print_step("  Steps completed", f"✓ total reward: {total_reward:.4f}")
+        
         env.close()
+        print("\n✓ TEST 3 PASSED: Trading environment works!")
+        return env
+        
+    except Exception as e:
+        print(f"\n✗ TEST 3 FAILED: {e}")
+        traceback.print_exc()
+        return None
+
+
+def test_ppo_training(price_data, feature_data):
+    """Test 4: Train PPO agent."""
+    print_header("TEST 4: PPO Training")
+    
+    if price_data is None or feature_data is None:
+        print("  Skipping - missing data")
         return False
     
-    env.close()
-    print("\n✓ TEST 2 PASSED: TD3 works with regime-aware replay!")
-    return True
+    try:
+        from src.environment.trading_env import TradingEnvironment
+        from src.agents.ppo_agent import PPOAgent
+        
+        print_step("Creating environment and agent")
+        env = TradingEnvironment(
+            price_data=price_data,
+            feature_data=feature_data,
+            episode_length=50,  # Short episodes for testing
+            random_start=True
+        )
+        
+        agent = PPOAgent(env, verbose=0)
+        print_step("Agent created", "✓")
+        
+        print_step("Training for 1,000 steps")
+        start_time = time.time()
+        agent.train(total_timesteps=1000, progress_bar=False)
+        elapsed = time.time() - start_time
+        
+        print_step("Training completed", f"✓ ({elapsed:.1f}s)")
+        
+        # Test prediction
+        obs, _ = env.reset()
+        action, _ = agent.predict(obs, deterministic=True)
+        print_step("Prediction", f"✓ action shape: {action.shape}")
+        
+        env.close()
+        print("\n✓ TEST 4 PASSED: PPO training works!")
+        return True
+        
+    except Exception as e:
+        print(f"\n✗ TEST 4 FAILED: {e}")
+        traceback.print_exc()
+        return False
 
 
-def test_rainbow_basic():
-    """Test 3: Rainbow DQN basic functionality."""
-    print("\n" + "=" * 60)
-    print("TEST 3: Rainbow DQN Basic Functionality")
-    print("=" * 60)
+def test_sac_training(price_data, feature_data):
+    """Test 5: Train SAC agent."""
+    print_header("TEST 5: SAC Training")
     
-    import gymnasium as gym
-    from src.agents.rainbow_agent import RainbowAgent
+    if price_data is None or feature_data is None:
+        print("  Skipping - missing data")
+        return False
     
-    # Rainbow needs discrete actions - CartPole is perfect
-    env = gym.make("CartPole-v1")
-    
-    # Create Rainbow agent
-    print("Creating Rainbow agent...")
-    agent = RainbowAgent(env, device="cpu")
-    
-    print(f"  ✓ Agent created")
-    print(f"  Observation dim: {agent.obs_dim}")
-    print(f"  Number of actions: {agent.n_actions}")
-    print(f"  N-atoms (C51): {agent.config.get('n_atoms')}")
-    print(f"  N-steps: {agent.config.get('n_steps')}")
-    
-    # Test action selection
-    obs, _ = env.reset()
-    action = agent.select_action(obs, training=True)
-    print(f"  ✓ Action selection works (action: {action})")
-    
-    # Quick training
-    print("  Training for 500 steps...")
-    history = agent.train(total_timesteps=500, progress_bar=False, eval_freq=1000)
-    print(f"  ✓ Training completed ({agent.episodes} episodes)")
-    
-    env.close()
-    print("\n✓ TEST 3 PASSED: Rainbow DQN basic functionality works!")
-    return True
+    try:
+        from src.environment.trading_env import TradingEnvironment
+        from src.agents.sac_agent import SACAgent
+        
+        print_step("Creating environment and agent")
+        env = TradingEnvironment(
+            price_data=price_data,
+            feature_data=feature_data,
+            episode_length=50,
+            random_start=True
+        )
+        
+        agent = SACAgent(env, verbose=0)
+        print_step("Agent created", "✓")
+        
+        print_step("Training for 1,000 steps")
+        start_time = time.time()
+        agent.train(total_timesteps=1000, progress_bar=False)
+        elapsed = time.time() - start_time
+        
+        print_step("Training completed", f"✓ ({elapsed:.1f}s)")
+        
+        env.close()
+        print("\n✓ TEST 5 PASSED: SAC training works!")
+        return True
+        
+    except Exception as e:
+        print(f"\n✗ TEST 5 FAILED: {e}")
+        traceback.print_exc()
+        return False
 
 
-def test_discrete_action_wrapper():
-    """Test 4: DiscreteActionWrapper for continuous environments."""
-    print("\n" + "=" * 60)
-    print("TEST 4: DiscreteActionWrapper")
-    print("=" * 60)
+def test_td3_training(price_data, feature_data):
+    """Test 6: Train TD3 agent."""
+    print_header("TEST 6: TD3 Training")
     
-    import gymnasium as gym
-    from src.agents.rainbow_agent import DiscreteActionWrapper
+    if price_data is None or feature_data is None:
+        print("  Skipping - missing data")
+        return False
     
-    # Create continuous environment
-    cont_env = gym.make("Pendulum-v1")
-    print(f"Original action space: {cont_env.action_space}")
-    
-    # Wrap with discrete actions
-    wrapped_env = DiscreteActionWrapper(cont_env, actions_per_asset=3, step_size=0.1)
-    print(f"Wrapped action space: {wrapped_env.action_space}")
-    print(f"Number of discrete actions: {wrapped_env.n_actions}")
-    
-    # Test step
-    obs, _ = wrapped_env.reset()
-    action = wrapped_env.action_space.sample()  # Random discrete action
-    next_obs, reward, terminated, truncated, info = wrapped_env.step(action)
-    
-    print(f"  ✓ Reset works (obs shape: {obs.shape})")
-    print(f"  ✓ Step works (discrete action {action} → continuous weights)")
-    
-    wrapped_env.close()
-    print("\n✓ TEST 4 PASSED: DiscreteActionWrapper works!")
-    return True
+    try:
+        from src.environment.trading_env import TradingEnvironment
+        from src.agents.td3_agent import TD3Agent
+        
+        print_step("Creating environment and agent")
+        env = TradingEnvironment(
+            price_data=price_data,
+            feature_data=feature_data,
+            episode_length=50,
+            random_start=True
+        )
+        
+        agent = TD3Agent(env, verbose=0)
+        print_step("Agent created", "✓")
+        
+        print_step("Training for 1,000 steps")
+        start_time = time.time()
+        agent.train(total_timesteps=1000, progress_bar=False)
+        elapsed = time.time() - start_time
+        
+        print_step("Training completed", f"✓ ({elapsed:.1f}s)")
+        
+        env.close()
+        print("\n✓ TEST 6 PASSED: TD3 training works!")
+        return True
+        
+    except Exception as e:
+        print(f"\n✗ TEST 6 FAILED: {e}")
+        traceback.print_exc()
+        return False
 
 
-def test_rainbow_components():
-    """Test 5: Rainbow individual components (Noisy, Dueling, etc.)."""
-    print("\n" + "=" * 60)
-    print("TEST 5: Rainbow Components")
-    print("=" * 60)
+def test_rainbow_training(price_data, feature_data):
+    """Test 7: Train Rainbow agent (with DiscreteActionWrapper)."""
+    print_header("TEST 7: Rainbow Training")
     
-    import torch
-    from src.agents.rainbow_agent import NoisyLinear, DuelingNetwork
+    if price_data is None or feature_data is None:
+        print("  Skipping - missing data")
+        return False
     
-    # Test NoisyLinear
-    print("Testing NoisyLinear layer...")
-    noisy = NoisyLinear(64, 32)
-    x = torch.randn(8, 64)
-    
-    # Forward pass
-    out1 = noisy(x)
-    noisy.reset_noise()
-    out2 = noisy(x)
-    
-    # Outputs should be different after resetting noise
-    print(f"  ✓ NoisyLinear output shape: {out1.shape}")
-    print(f"  ✓ Noise changes output: {not torch.allclose(out1, out2)}")
-    
-    # Test DuelingNetwork
-    print("Testing DuelingNetwork...")
-    net = DuelingNetwork(
-        observation_dim=64,
-        n_actions=10,
-        hidden_dims=[128, 128],
-        n_atoms=51,
-        noisy=True
-    )
-    
-    obs = torch.randn(4, 64)
-    q_dist = net(obs)
-    q_values = net.get_q_values(obs)
-    
-    print(f"  ✓ Q-distribution shape: {q_dist.shape} (batch, actions, atoms)")
-    print(f"  ✓ Q-values shape: {q_values.shape} (batch, actions)")
-    print(f"  ✓ Distribution sums to 1: {torch.allclose(q_dist.sum(dim=-1), torch.ones(4, 10))}")
-    
-    print("\n✓ TEST 5 PASSED: Rainbow components work!")
-    return True
+    try:
+        from src.environment.trading_env import TradingEnvironment
+        from src.agents.rainbow_agent import RainbowAgent, DiscreteActionWrapper
+        
+        print_step("Creating environment")
+        env = TradingEnvironment(
+            price_data=price_data,
+            feature_data=feature_data,
+            episode_length=50,
+            random_start=True
+        )
+        
+        # Rainbow needs discrete actions
+        print_step("Wrapping with DiscreteActionWrapper")
+        wrapped_env = DiscreteActionWrapper(env, actions_per_asset=3, step_size=0.1)
+        print_step("  Discrete actions", f"{wrapped_env.n_actions} total")
+        
+        agent = RainbowAgent(wrapped_env, device="cpu", verbose=0)
+        print_step("Agent created", "✓")
+        
+        print_step("Training for 500 steps")
+        start_time = time.time()
+        agent.train(total_timesteps=500, progress_bar=False)
+        elapsed = time.time() - start_time
+        
+        print_step("Training completed", f"✓ ({elapsed:.1f}s, {agent.episodes} episodes)")
+        
+        wrapped_env.close()
+        print("\n✓ TEST 7 PASSED: Rainbow training works!")
+        return True
+        
+    except Exception as e:
+        print(f"\n✗ TEST 7 FAILED: {e}")
+        traceback.print_exc()
+        return False
 
 
-def test_save_load():
-    """Test 6: Save and load functionality."""
-    print("\n" + "=" * 60)
-    print("TEST 6: Save and Load")
-    print("=" * 60)
+def test_regime_aware_training(price_data, feature_data):
+    """Test 8: Train with regime-aware replay buffer."""
+    print_header("TEST 8: Regime-Aware Replay (SAC)")
     
-    import gymnasium as gym
-    import tempfile
-    import os
-    from src.agents.td3_agent import TD3Agent
-    from src.agents.rainbow_agent import RainbowAgent
+    if price_data is None or feature_data is None:
+        print("  Skipping - missing data")
+        return False
     
-    # Test TD3 save/load
-    print("Testing TD3 save/load...")
-    env = gym.make("Pendulum-v1")
-    agent = TD3Agent(env, verbose=0)
+    try:
+        from src.environment.trading_env import TradingEnvironment
+        from src.agents.sac_agent import SACAgent
+        from src.replay.regime_aware_buffer import RegimeAwareReplayBuffer, SamplingStrategy
+        
+        print_step("Creating environment")
+        env = TradingEnvironment(
+            price_data=price_data,
+            feature_data=feature_data,
+            episode_length=50,
+            random_start=True
+        )
+        
+        print_step("Creating RegimeAwareReplayBuffer")
+        buffer = RegimeAwareReplayBuffer(
+            buffer_size=10000,
+            strategy=SamplingStrategy.BALANCED
+        )
+        
+        print_step("Creating SAC with regime-aware replay")
+        agent = SACAgent(env, replay_buffer=buffer, verbose=0)
+        
+        print_step("Training for 1,000 steps")
+        start_time = time.time()
+        agent.train(total_timesteps=1000, progress_bar=False)
+        elapsed = time.time() - start_time
+        
+        print_step("Training completed", f"✓ ({elapsed:.1f}s)")
+        
+        # Check buffer stats
+        print_step("Buffer stats")
+        stats = buffer.get_statistics()
+        for regime, count in stats.get('experiences_per_regime', {}).items():
+            print_step(f"  {regime}", f"{count} experiences")
+        
+        env.close()
+        print("\n✓ TEST 8 PASSED: Regime-aware replay works!")
+        return True
+        
+    except Exception as e:
+        print(f"\n✗ TEST 8 FAILED: {e}")
+        traceback.print_exc()
+        return False
+
+
+def estimate_training_time():
+    """Estimate how long full training will take."""
+    print_header("TRAINING TIME ESTIMATE")
     
-    with tempfile.TemporaryDirectory() as tmpdir:
-        save_path = os.path.join(tmpdir, "td3_test")
-        agent.save(save_path)
-        agent.load(save_path)
-        print(f"  ✓ TD3 save/load works")
-    
-    env.close()
-    
-    # Test Rainbow save/load
-    print("Testing Rainbow save/load...")
-    env = gym.make("CartPole-v1")
-    agent = RainbowAgent(env, device="cpu")
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        save_path = os.path.join(tmpdir, "rainbow_test")
-        agent.save(save_path)
-        agent.load(save_path)
-        print(f"  ✓ Rainbow save/load works")
-    
-    env.close()
-    
-    print("\n✓ TEST 6 PASSED: Save/load works for both agents!")
-    return True
+    print("""
+Based on your CPU-only setup:
+
+| Timesteps | Estimated Time (per run) |
+|-----------|--------------------------|
+| 10,000    | ~2-5 minutes             |
+| 100,000   | ~20-50 minutes           |
+| 500,000   | ~2-4 hours               |
+| 1,000,000 | ~4-8 hours               |
+
+For Week 6 experiments (E1: Algorithm x Replay comparison):
+- 4 algorithms × 5 replay types × 5 seeds = 100 runs
+- At 100,000 steps each: ~33-83 hours total
+- Recommendation: Start with 50,000 steps, run overnight
+
+To speed up:
+1. Use shorter episodes (50-100 days vs 252)
+2. Run fewer seeds initially (3 instead of 5)
+3. Use Google Colab for GPU access (free tier)
+""")
 
 
 def main():
-    """Run all tests."""
-    print("=" * 60)
-    print("WEEK 5 TESTS - TD3 & RAINBOW DQN")
-    print("=" * 60)
-    print("Testing TD3 and Rainbow DQN implementations...")
-    print("This verifies your Week 5 code is working correctly.")
+    """Run all integration tests."""
+    print("\n" + "=" * 70)
+    print(" INTEGRATION TEST - Verifying All Components")
+    print("=" * 70)
+    print("\nThis script tests that your entire pipeline works together.")
+    print("Estimated time: 10-15 minutes\n")
     
-    tests = [
-        ("TD3 Basic", test_td3_basic),
-        ("TD3 + Regime-Aware Replay", test_td3_with_regime_aware_replay),
-        ("Rainbow Basic", test_rainbow_basic),
-        ("DiscreteActionWrapper", test_discrete_action_wrapper),
-        ("Rainbow Components", test_rainbow_components),
-        ("Save/Load", test_save_load),
-    ]
+    results = {}
     
-    results = []
-    for name, test_func in tests:
-        try:
-            result = test_func()
-            results.append((name, result, None))
-        except Exception as e:
-            results.append((name, False, str(e)))
-            print(f"\n✗ TEST FAILED: {name}")
-            print(f"  Error: {e}")
-            traceback.print_exc()
+    # Test 1: Data loading
+    price_data = test_data_loading()
+    results['Data Loading'] = price_data is not None
+    
+    # Test 2: Feature calculation
+    feature_data = test_feature_calculation(price_data)
+    results['Feature Calculation'] = feature_data is not None
+    
+    # Test 3: Trading environment
+    env_result = test_trading_environment(price_data, feature_data)
+    results['Trading Environment'] = env_result is not None
+    
+    # Test 4-7: Algorithm training
+    results['PPO Training'] = test_ppo_training(price_data, feature_data)
+    results['SAC Training'] = test_sac_training(price_data, feature_data)
+    results['TD3 Training'] = test_td3_training(price_data, feature_data)
+    results['Rainbow Training'] = test_rainbow_training(price_data, feature_data)
+    
+    # Test 8: Regime-aware replay
+    results['Regime-Aware Replay'] = test_regime_aware_training(price_data, feature_data)
+    
+    # Training time estimate
+    estimate_training_time()
     
     # Summary
-    print("\n" + "=" * 60)
-    print("TEST SUMMARY")
-    print("=" * 60)
+    print_header("INTEGRATION TEST SUMMARY")
     
-    passed = sum(1 for _, result, _ in results if result)
+    passed = sum(results.values())
     total = len(results)
     
-    for name, result, error in results:
+    for test_name, result in results.items():
         status = "✓ PASS" if result else "✗ FAIL"
-        print(f"  {status}: {name}")
-        if error:
-            print(f"         Error: {error}")
+        print(f"  {status}: {test_name}")
     
     print(f"\nResults: {passed}/{total} tests passed")
     
     if passed == total:
-        print("\n" + "=" * 60)
-        print("🎉 ALL TESTS PASSED! Week 5 implementation complete!")
-        print("=" * 60)
-        print("\nYour TD3 and Rainbow DQN agents are ready.")
-        print("\nNext steps:")
-        print("  1. Update src/agents/__init__.py with new imports")
-        print("  2. Test with your actual TradingEnv")
-        print("  3. Move to Week 6: Experiments")
+        print("\n" + "=" * 70)
+        print(" 🎉 ALL INTEGRATION TESTS PASSED!")
+        print("=" * 70)
+        print("""
+Your entire pipeline is working! You're ready for Week 6 experiments.
+
+Recommended next steps:
+1. Run a longer training session (10,000+ steps) to verify stability
+2. Set up experiment tracking (TensorBoard or W&B)
+3. Create the experiment runner script for systematic comparisons
+""")
     else:
-        print("\n" + "=" * 60)
-        print("⚠️  SOME TESTS FAILED")
-        print("=" * 60)
-        print("\nCheck the error messages above and fix the issues.")
+        print("\n" + "=" * 70)
+        print(" ⚠️ SOME TESTS FAILED")
+        print("=" * 70)
+        print("\nFix the failing components before starting experiments.")
     
     return passed == total
 
