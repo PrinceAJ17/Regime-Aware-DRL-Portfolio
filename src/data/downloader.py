@@ -428,6 +428,11 @@ def download_multiple_tickers(
 def save_to_cache(
     data: Dict[str, pd.DataFrame],
     cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR
+
+    # Function signature takes a dictionary mapping ticker symbols to DataFrames and a directory path for where to save. 
+    # Returns none while saving files and doing nothing else in return. 
+    # Union just allows us to use either a string or a path.
+
 ) -> None:
     """
     Save downloaded data to CSV files for later use.
@@ -465,15 +470,23 @@ def save_to_cache(
     cache_dir = Path(cache_dir)
     _ensure_directory_exists(cache_dir)
     
+    # Converts the cache_dir input parameter to a Path object and create a directory if it doesn't exist. 
+    # If data/raw/ folder is missing, this creates it before we try to save files.
+
     for ticker, df in data.items():
+        #Loop through the dictionary. The .items() method gives both the key (ticker) and value (DataFrame) for each entry.
+        #Example: if data = {'SPY': DataFrame1, 'QQQ': DataFrame2}
+        #Iteration 1: ticker='SPY', df=DataFrame1
+        #Iteration 2: ticker='QQQ', df=DataFrame2
         filepath = _get_cache_filepath(ticker, cache_dir)
-        
-        # index=True saves the DatetimeIndex as a column
-        # This is important — we need to recover the dates when loading!
+        #Use our helper function to generate the file path.
+        #Example: ticker='SPY', cache_dir='data/raw' → filepath='data/raw/SPY.csv'
         df.to_csv(filepath, index=True)
+        #in-built function that save the dataframe to the filepath specified while saving the dates(which are the DataFrame's index) as a column in the CSV.
+        #Without this, we would lose the date information when saving
         
         logger.info(f"Saved {ticker} to {filepath}")
-
+        #Log what we saved for debugging purposes.
 
 def load_from_cache(
     tickers: List[str],
@@ -509,25 +522,27 @@ def load_from_cache(
     """
     cache_dir = Path(cache_dir)
     results = {}
-    
+    # Converts to a path object and creates an empty dictionary to load data into.
     for ticker in tickers:
         filepath = _get_cache_filepath(ticker, cache_dir)
-        
+        # Loop through each requested ticker and generate its file path
         if filepath.exists():
             try:
-                # Read CSV with the first column as index (the dates)
-                # parse_dates=True converts the index to DatetimeIndex
                 df = pd.read_csv(
                     filepath,
                     index_col=0,
                     parse_dates=True
                 )
-                
+                #index_col=0: Use the first column (dates) as the DataFrame's index, not as a regular column.
+		        #parse_dates=True: Convert date strings like "2020-01-02" into actual datetime objects.
+		        #This is the reverse of what to_csv() did — we're restoring the original DataFrame structure.
                 results[ticker] = df
                 logger.info(f"Loaded {ticker} from cache ({len(df)} rows)")
-                
+                #Add the loaded DataFrame to our results dictionary and log the success.
             except Exception as e:
                 logger.error(f"Error loading {ticker} from cache: {str(e)}")
+                #If something goes wrong (corrupted file, wrong format, etc.), log the error and continue.
+		        #Don't crash — just skip this ticker and try the next one.
         else:
             logger.debug(f"No cache found for {ticker}")
     
