@@ -665,6 +665,11 @@ class ReplayBufferWrapper:
         
         if regime is None:
             regime = self._current_regime
+
+        # Default to sideways if no regime detected
+        if regime is None:
+            from src.replay.regime_aware_buffer import MarketRegime
+            regime = MarketRegime.SIDEWAYS
         
         # Handle batched inputs (n_envs > 1)
         if len(obs.shape) > 1:

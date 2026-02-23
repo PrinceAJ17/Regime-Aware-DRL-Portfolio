@@ -18,6 +18,7 @@ Date: February 2026
 
 import numpy as np
 import sys
+import traceback
 from pathlib import Path
 
 # Add project root to path
@@ -83,14 +84,26 @@ def test_td3_with_regime_aware_replay():
     
     # Create TD3 with custom buffer
     print("Creating TD3 agent with regime-aware replay...")
-    agent = TD3Agent(env, replay_buffer=buffer, verbose=0)
+    try:
+        agent = TD3Agent(env, replay_buffer=buffer, verbose=1)
+        print(f"  ✓ TD3 created with RegimeAwareReplayBuffer")
+    except Exception as e:
+        print(f"  ✗ Failed to create agent: {e}")
+        traceback.print_exc()
+        return False
     
-    print(f"  ✓ TD3 created with RegimeAwareReplayBuffer")
-    
-    # Quick training
+    # Quick training - with detailed error catching
     print("  Training for 500 steps...")
-    agent.train(total_timesteps=500, progress_bar=False)
-    print(f"  ✓ Training with regime-aware replay completed")
+    try:
+        agent.train(total_timesteps=500, progress_bar=False)
+        print(f"  ✓ Training with regime-aware replay completed")
+    except Exception as e:
+        print(f"  ✗ Training failed!")
+        print(f"  Exception type: {type(e).__name__}")
+        print(f"  Exception message: {e}")
+        traceback.print_exc()
+        env.close()
+        return False
     
     env.close()
     print("\n✓ TEST 2 PASSED: TD3 works with regime-aware replay!")
@@ -278,6 +291,7 @@ def main():
             results.append((name, False, str(e)))
             print(f"\n✗ TEST FAILED: {name}")
             print(f"  Error: {e}")
+            traceback.print_exc()
     
     # Summary
     print("\n" + "=" * 60)
