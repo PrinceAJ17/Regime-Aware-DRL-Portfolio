@@ -202,7 +202,7 @@ class TD3Agent(BaseAgent):
             "target_noise_clip": 0.5,  # Clip target noise
             
             # Training frequency
-            "train_freq": 1,  # Update every step
+            "train_freq": 4,  # Update every 4 steps (125K gradient steps per 500K timesteps)
             "gradient_steps": 1,  # Gradient steps per update
             "learning_starts": 10_000,  # Steps before training begins
             
@@ -335,15 +335,15 @@ class TD3Agent(BaseAgent):
                 env=self.env,
             )
             model.replay_buffer = wrapped_buffer
-            print(f"✓ TD3 using RegimeAwareReplayBuffer with {self.replay_buffer.strategy.value} sampling")
+            print(f"[OK] TD3 using RegimeAwareReplayBuffer with {self.replay_buffer.strategy.value} sampling")
         elif isinstance(self.replay_buffer, ReplayBuffer):
             # Standard SB3 buffer
             model.replay_buffer = self.replay_buffer
-            print("✓ TD3 using custom standard ReplayBuffer")
+            print("[OK] TD3 using custom standard ReplayBuffer")
         else:
             # Try to use as-is
             model.replay_buffer = self.replay_buffer
-            print("✓ TD3 using custom buffer (type: {})".format(type(self.replay_buffer).__name__))
+            print("[OK] TD3 using custom buffer (type: {})".format(type(self.replay_buffer).__name__))
     
     def train(
         self,
@@ -357,7 +357,7 @@ class TD3Agent(BaseAgent):
         save_freq: int = 50_000,
         save_path: Optional[str] = None,
         reset_num_timesteps: bool = False,
-        progress_bar: bool = True,
+        progress_bar: bool = False,
         callbacks: Optional[list] = None,
     ) -> 'TrainingMetrics':
         """
@@ -495,7 +495,7 @@ class TD3Agent(BaseAgent):
         save_path = Path(path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
         self.model.save(str(save_path))
-        print(f"✓ TD3 model saved to {save_path}")
+        print(f"[OK] TD3 model saved to {save_path}")
     
     def load(self, path: str, env: Optional[gym.Env] = None) -> "TD3Agent":
         """
@@ -517,7 +517,7 @@ class TD3Agent(BaseAgent):
             self.env = env
         
         self.model = TD3.load(path, env=self.env)
-        print(f"✓ TD3 model loaded from {path}")
+        print(f"[OK] TD3 model loaded from {path}")
         return self
     
     def evaluate(
@@ -595,7 +595,7 @@ if __name__ == "__main__":
     # Test 1: Create agent with default config
     print("\n[1] Creating TD3 agent with default config...")
     agent = TD3Agent(env, verbose=0)
-    print(f"    ✓ Agent created")
+    print(f"    [OK] Agent created")
     print(f"    Learning rate: {agent.config.get('learning_rate')}")
     print(f"    Policy delay: {agent.config.get('policy_delay')}")
     print(f"    Target noise: {agent.config.get('target_policy_noise')}")
@@ -603,7 +603,7 @@ if __name__ == "__main__":
     # Test 2: Quick training
     print("\n[2] Quick training test (1000 steps)...")
     agent.train(total_timesteps=1000, progress_bar=False)
-    print(f"    ✓ Training completed")
+    print(f"    [OK] Training completed")
     
     # Test 3: Prediction
     print("\n[3] Testing prediction...")
@@ -611,19 +611,19 @@ if __name__ == "__main__":
     action, _ = agent.predict(obs, deterministic=True)
     print(f"    Observation shape: {obs.shape}")
     print(f"    Action shape: {action.shape}")
-    print(f"    ✓ Prediction works")
+    print(f"    [OK] Prediction works")
     
     # Test 4: Evaluation
     print("\n[4] Running evaluation (3 episodes)...")
     eval_results = agent.evaluate(env, n_episodes=3)
     print(f"    Mean reward: {eval_results['mean_reward']:.2f}")
-    print(f"    ✓ Evaluation works")
+    print(f"    [OK] Evaluation works")
     
     # Test 5: Save and load
     print("\n[5] Testing save/load...")
     agent.save("/tmp/test_td3")
     agent.load("/tmp/test_td3")
-    print(f"    ✓ Save/load works")
+    print(f"    [OK] Save/load works")
     
     print("\n" + "=" * 70)
     print("ALL TESTS PASSED!")

@@ -140,20 +140,61 @@ class RuleBasedRegimeDetector:
     def __init__(self, config: Optional[RegimeDetectionConfig] = None):
         """
         Initialise the regime detector.
-        
+
         Parameters:
         -----------
         config : RegimeDetectionConfig, optional
             Configuration parameters. If None, uses defaults.
         """
         self.config = config or RegimeDetectionConfig()
-        
+
         # Store the volatility threshold once calculated
         # (we calculate it from historical data)
         self._volatility_threshold: Optional[float] = None
-        
+
+        # When True, _volatility_threshold was set by fit() on training data
+        # and should NOT be overwritten on subsequent detect() calls.
+        self._threshold_fitted: bool = False
+
         # Store regime history for analysis
         self._regime_history: List[Tuple[pd.Timestamp, MarketRegime]] = []
+
+    def fit(self, price_data, verbose: bool = False) -> "RuleBasedRegimeDetector":
+        """
+        Anchor the volatility threshold to training data.
+
+        Call this ONCE on training data before calling detect() on val/test
+        data. This prevents look-ahead bias: the 75th-percentile threshold is
+        fixed from the training distribution and applied consistently to all
+        splits.
+
+        Parameters:
+        -----------
+        price_data : pd.DataFrame or dict
+            Training price data (same format accepted by detect()).
+        verbose : bool
+            Print the computed threshold.
+        """
+        if isinstance(price_data, dict):
+            price_data = price_data.get('SPY', list(price_data.values())[0])
+
+        actual_col = None
+        for col in ['Close', 'close', 'Adj Close', 'adj_close']:
+            if col in price_data.columns:
+                actual_col = col
+                break
+        if actual_col is None:
+            actual_col = price_data.columns[0]
+
+        prices = price_data[actual_col]
+        volatility = self._calculate_volatility(prices, self.config.volatility_period)
+        self._volatility_threshold = self._determine_volatility_threshold(volatility)
+        self._threshold_fitted = True
+
+        if verbose:
+            print(f"[RuleBasedDetector] Volatility threshold anchored to training data: "
+                  f"{self._volatility_threshold:.6f}")
+        return self
     
     def _calculate_sma(self, prices: pd.Series, period: int) -> pd.Series:
         """
@@ -416,8 +457,11 @@ class RuleBasedRegimeDetector:
         sma_long = self._calculate_sma(prices, self.config.sma_long_period)
         volatility = self._calculate_volatility(prices, self.config.volatility_period)
         
-        # Step 2: Determine volatility threshold from the data
-        self._volatility_threshold = self._determine_volatility_threshold(volatility)
+        # Step 2: Determine volatility threshold.
+        # If fit() was called on training data, reuse that threshold to avoid
+        # look-ahead bias when detect() is called on val/test splits.
+        if not self._threshold_fitted:
+            self._volatility_threshold = self._determine_volatility_threshold(volatility)
         
         # Step 3: Classify each day
         regimes = []

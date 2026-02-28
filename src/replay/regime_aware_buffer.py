@@ -376,20 +376,19 @@ class RegimeAwareReplayBuffer:
         # Sample from each regime
         for regime, n_samples in samples_per_regime.items():
             if n_samples > 0:
-                regime_experiences = random.sample(
-                    list(self._regime_buffers[regime]), 
-                    n_samples
-                )
+                buf = self._regime_buffers[regime]
+                indices = np.random.choice(len(buf), n_samples, replace=False)
+                regime_experiences = [buf[i] for i in indices]
                 experiences.extend(regime_experiences)
                 self._samples_per_regime[regime] += n_samples
-        
+
         # Shuffle to mix regimes in batch
         random.shuffle(experiences)
-        
+
         self._total_sampled += len(experiences)
-        
+
         return self._experiences_to_batch(experiences)
-    
+
     def _sample_current_focused(
         self, 
         batch_size: int,
@@ -426,22 +425,20 @@ class RegimeAwareReplayBuffer:
         n_current = min(n_current, current_available)
         
         if n_current > 0:
-            current_experiences = random.sample(
-                list(self._regime_buffers[current_regime]),
-                n_current
-            )
+            buf = self._regime_buffers[current_regime]
+            indices = np.random.choice(len(buf), n_current, replace=False)
+            current_experiences = [buf[i] for i in indices]
             experiences.extend(current_experiences)
             self._samples_per_regime[current_regime] += n_current
-        
+
         # Fill remaining from others
         remaining = batch_size - len(experiences)
         for regime in other_regimes:
             n_sample = min(n_per_other, len(self._regime_buffers[regime]), remaining)
             if n_sample > 0:
-                regime_experiences = random.sample(
-                    list(self._regime_buffers[regime]),
-                    n_sample
-                )
+                buf = self._regime_buffers[regime]
+                indices = np.random.choice(len(buf), n_sample, replace=False)
+                regime_experiences = [buf[i] for i in indices]
                 experiences.extend(regime_experiences)
                 self._samples_per_regime[regime] += n_sample
                 remaining -= n_sample
@@ -510,18 +507,17 @@ class RegimeAwareReplayBuffer:
         # Sample from each regime
         for regime, n_samples in samples_per_regime.items():
             if n_samples > 0:
-                regime_experiences = random.sample(
-                    list(self._regime_buffers[regime]),
-                    n_samples
-                )
+                buf = self._regime_buffers[regime]
+                indices = np.random.choice(len(buf), n_samples, replace=False)
+                regime_experiences = [buf[i] for i in indices]
                 experiences.extend(regime_experiences)
                 self._samples_per_regime[regime] += n_samples
-        
+
         random.shuffle(experiences)
         self._total_sampled += len(experiences)
-        
+
         return self._experiences_to_batch(experiences)
-    
+
     def _sample_adaptive(self, batch_size: int) -> Dict[str, np.ndarray]:
         """
         ADAPTIVE SAMPLING STRATEGY
@@ -577,10 +573,9 @@ class RegimeAwareReplayBuffer:
         # Sample
         for regime, n_samples in samples_per_regime.items():
             if n_samples > 0:
-                regime_experiences = random.sample(
-                    list(self._regime_buffers[regime]),
-                    n_samples
-                )
+                buf = self._regime_buffers[regime]
+                indices = np.random.choice(len(buf), n_samples, replace=False)
+                regime_experiences = [buf[i] for i in indices]
                 experiences.extend(regime_experiences)
                 self._samples_per_regime[regime] += n_samples
         
@@ -626,9 +621,8 @@ class RegimeAwareReplayBuffer:
         dones = np.array([e.done for e in experiences], dtype=np.float32)
         
         # Also return regime labels (useful for analysis)
-        regime_indices = np.array([
-            list(MarketRegime).index(e.regime) for e in experiences
-        ])
+        _regime_to_idx = {r: i for i, r in enumerate(MarketRegime)}
+        regime_indices = np.array([_regime_to_idx[e.regime] for e in experiences])
         
         return {
             'states': states,
@@ -731,6 +725,231 @@ class RegimeAwareReplayBuffer:
         
         # Convert to percentages
         return {r: c / batch_size * 100 for r, c in regime_counts.items()}
+
+
+class RegimeAwarePrioritizedBuffer:
+    """
+    Hybrid buffer combining Prioritized Experience Replay with regime-aware sampling.
+
+    Designed for Rainbow DQN integration. Stores experiences with both:
+    - PER priorities (TD-error based, for individual experience importance)
+    - Regime labels (for regime-level sampling balance)
+
+    Sampling combines regime strategy weights with PER priorities:
+    1. Determine per-regime sample counts using the regime strategy
+    2. Within each regime, sample proportional to PER priorities
+
+    Returns the 7-tuple format Rainbow's update() expects:
+    (states, actions, rewards, next_states, dones, indices, weights)
+    """
+
+    def __init__(
+        self,
+        capacity: int = 200_000,
+        strategy: str = 'balanced',
+        alpha: float = 0.6,
+        beta_start: float = 0.4,
+        beta_frames: int = 100_000,
+        current_focus_ratio: float = 0.6,
+        random_seed: Optional[int] = None,
+    ):
+        self.capacity = capacity
+        self.strategy = SamplingStrategy(strategy) if isinstance(strategy, str) else strategy
+        self.alpha = alpha
+        self.beta_start = beta_start
+        self.beta_frames = beta_frames
+        self.current_focus_ratio = current_focus_ratio
+        self.frame = 1
+        self.max_priority = 1.0
+
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        # Per-regime storage: list of (experience_tuple, global_index)
+        self._regime_data: Dict[MarketRegime, List] = {r: [] for r in MarketRegime}
+        # Global flat storage for index-based access
+        self._all_data: List = [None] * capacity
+        self._priorities = np.zeros(capacity, dtype=np.float64)
+        self._regimes: List[Optional[MarketRegime]] = [None] * capacity
+        self._pos = 0
+        self._size = 0
+
+        # Regime-level TD error tracking for adaptive strategy
+        self._td_errors_sum: Dict[MarketRegime, float] = {r: 1.0 for r in MarketRegime}
+        self._td_errors_count: Dict[MarketRegime, int] = {r: 1 for r in MarketRegime}
+
+    @property
+    def beta(self) -> float:
+        return min(1.0, self.beta_start + (1.0 - self.beta_start) * self.frame / self.beta_frames)
+
+    @property
+    def buffer_size(self) -> int:
+        return self.capacity
+
+    @property
+    def total_buffer_size(self) -> int:
+        return self.capacity
+
+    def add(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        regime: Optional[str] = None,
+    ):
+        """Add experience with maximum priority."""
+        experience = (state, action, reward, next_state, done, regime)
+        priority = self.max_priority ** self.alpha
+
+        idx = self._pos
+
+        # Remove old entry from regime list if overwriting
+        if self._all_data[idx] is not None and self._regimes[idx] is not None:
+            old_regime = self._regimes[idx]
+            regime_list = self._regime_data[old_regime]
+            # Remove index from regime list (swap-remove for O(1))
+            self._regime_data[old_regime] = [i for i in regime_list if i != idx]
+
+        # Store
+        self._all_data[idx] = experience
+        self._priorities[idx] = priority
+
+        # Parse regime
+        if regime is not None:
+            if isinstance(regime, str):
+                try:
+                    parsed_regime = MarketRegime(regime)
+                except ValueError:
+                    parsed_regime = MarketRegime.SIDEWAYS
+            elif isinstance(regime, MarketRegime):
+                parsed_regime = regime
+            else:
+                parsed_regime = MarketRegime.SIDEWAYS
+        else:
+            parsed_regime = MarketRegime.SIDEWAYS
+
+        self._regimes[idx] = parsed_regime
+        self._regime_data[parsed_regime].append(idx)
+
+        self._pos = (self._pos + 1) % self.capacity
+        self._size = min(self._size + 1, self.capacity)
+
+    def _get_regime_counts(self) -> Dict[MarketRegime, int]:
+        return {r: len(indices) for r, indices in self._regime_data.items()}
+
+    def _compute_samples_per_regime(self, batch_size: int) -> Dict[MarketRegime, int]:
+        """Compute how many samples to draw from each regime based on strategy."""
+        counts = self._get_regime_counts()
+        total = sum(counts.values())
+        if total == 0:
+            return {r: 0 for r in MarketRegime}
+
+        if self.strategy == SamplingStrategy.BALANCED:
+            base = batch_size // len(MarketRegime)
+            result = {r: min(base, counts[r]) for r in MarketRegime}
+        elif self.strategy == SamplingStrategy.INVERSE_FREQUENCY:
+            weights = {r: 1.0 / (counts[r] + 1) for r in MarketRegime}
+            total_w = sum(weights.values())
+            result = {r: min(int(batch_size * weights[r] / total_w), counts[r]) for r in MarketRegime}
+        elif self.strategy == SamplingStrategy.ADAPTIVE:
+            mean_td = {r: self._td_errors_sum[r] / max(self._td_errors_count[r], 1) for r in MarketRegime}
+            total_td = sum(mean_td.values())
+            result = {r: min(int(batch_size * mean_td[r] / total_td), counts[r]) for r in MarketRegime}
+        else:
+            # CURRENT_FOCUSED or fallback — treat as balanced for Rainbow
+            # (Rainbow doesn't track current regime during training)
+            base = batch_size // len(MarketRegime)
+            result = {r: min(base, counts[r]) for r in MarketRegime}
+
+        # Distribute remainder
+        remaining = batch_size - sum(result.values())
+        for r in MarketRegime:
+            if remaining <= 0:
+                break
+            extra = min(remaining, counts[r] - result[r])
+            result[r] += extra
+            remaining -= extra
+
+        return result
+
+    def sample(self, batch_size: int) -> Tuple:
+        """
+        Sample using regime strategy + PER priorities within each regime.
+
+        Returns:
+        --------
+        tuple: (states, actions, rewards, next_states, dones, indices, weights)
+        """
+        samples_per_regime = self._compute_samples_per_regime(batch_size)
+
+        all_indices = []
+        for regime, n in samples_per_regime.items():
+            if n <= 0:
+                continue
+            regime_indices = self._regime_data[regime]
+            if len(regime_indices) == 0:
+                continue
+
+            # Get priorities for this regime's experiences
+            r_indices = np.array(regime_indices, dtype=np.int64)
+            r_priorities = self._priorities[r_indices]
+            r_probs = r_priorities / (r_priorities.sum() + 1e-12)
+
+            # Sample within regime proportional to PER priority
+            n_actual = min(n, len(r_indices))
+            chosen = np.random.choice(len(r_indices), n_actual, replace=False, p=r_probs)
+            all_indices.extend(r_indices[chosen].tolist())
+
+        # If we didn't get enough (rare regimes empty), fill from all
+        if len(all_indices) < batch_size:
+            remaining = batch_size - len(all_indices)
+            used = set(all_indices)
+            available = [i for i in range(self._size) if i not in used and self._all_data[i] is not None]
+            if available:
+                extra = np.random.choice(available, min(remaining, len(available)), replace=False)
+                all_indices.extend(extra.tolist())
+
+        indices_arr = np.array(all_indices, dtype=np.int64)
+
+        # Importance sampling weights
+        probs = self._priorities[indices_arr] / (self._priorities[:self._size].sum() + 1e-12)
+        min_prob = self._priorities[:self._size][self._priorities[:self._size] > 0].min() / (self._priorities[:self._size].sum() + 1e-12)
+        max_weight = (self._size * min_prob) ** (-self.beta)
+        weights = (self._size * probs) ** (-self.beta)
+        weights = weights / (max_weight + 1e-12)
+
+        # Build batch arrays
+        batch = [self._all_data[i] for i in indices_arr]
+        states = np.array([e[0] for e in batch])
+        actions = np.array([e[1] for e in batch])
+        rewards = np.array([e[2] for e in batch])
+        next_states = np.array([e[3] for e in batch])
+        dones = np.array([e[4] for e in batch])
+
+        self.frame += 1
+
+        return states, actions, rewards, next_states, dones, indices_arr, weights.astype(np.float32)
+
+    def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray):
+        """Update priorities based on TD errors."""
+        for idx, td_error in zip(indices, td_errors):
+            priority = (abs(td_error) + 1e-6) ** self.alpha
+            self._priorities[int(idx)] = priority
+            self.max_priority = max(self.max_priority, priority)
+
+            # Update regime-level TD tracking for adaptive strategy
+            regime = self._regimes[int(idx)]
+            if regime is not None:
+                self._td_errors_sum[regime] += abs(td_error)
+                self._td_errors_count[regime] += 1
+
+    def is_full(self) -> bool:
+        return self._size >= self.capacity
+
+    def __len__(self) -> int:
+        return self._size
 
 
 # =============================================================================

@@ -679,11 +679,14 @@ class ReplayBufferWrapper:
 
         # Cache regime series for O(1) lookups
         self._regime_cache = None
+        self._regime_values = None
         if price_data is not None and regime_detector is not None:
             try:
                 self._regime_cache = regime_detector.detect(price_data)
+                self._regime_values = self._regime_cache.values
             except Exception:
                 self._regime_cache = None
+                self._regime_values = None
     
     def _get_env_step(self) -> Optional[int]:
         """Get the current step index from the environment."""
@@ -721,11 +724,11 @@ class ReplayBufferWrapper:
         if infos and len(infos) > 0 and isinstance(infos[0], dict) and 'regime' in infos[0]:
             regime_str = infos[0]['regime']
 
-        # Method 2: Use cached regime series + env step index
-        elif self._regime_cache is not None:
+        # Method 2: Use cached regime array + env step index
+        elif self._regime_values is not None:
             current_step = self._get_env_step()
-            if current_step is not None and 0 <= current_step < len(self._regime_cache):
-                regime_val = self._regime_cache.iloc[current_step]
+            if current_step is not None and 0 <= current_step < len(self._regime_values):
+                regime_val = self._regime_values[current_step]
                 regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
 
         # Method 3: Use stored current regime from callback
@@ -766,12 +769,12 @@ class ReplayBufferWrapper:
     def sample(self, batch_size: int, env=None):
         """
         Sample a batch of experiences (SB3 format).
-        
+
         Returns a ReplayBufferSamples named tuple that SB3 expects.
         """
         import torch
         from stable_baselines3.common.buffers import ReplayBufferSamples
-        
+
         # Sample from regime-aware buffer
         batch = self.regime_buffer.sample(
             batch_size=batch_size,

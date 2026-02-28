@@ -387,18 +387,82 @@ class DuelingNetwork(nn.Module):
 # Prioritized Experience Replay with Regime Awareness
 # =============================================================================
 
+class SumTree:
+    """
+    Sum Tree for O(log N) prioritized sampling (Schaul et al. 2016).
+
+    A binary tree where each leaf stores a priority value and each
+    parent stores the sum of its children. This enables:
+    - update(index, priority): O(log N)
+    - sample(value): O(log N)
+    - total(): O(1)
+    """
+
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity - 1, dtype=np.float64)
+        self.data = [None] * capacity
+        self.write_pos = 0
+        self.size = 0
+
+    def _propagate(self, idx: int, change: float):
+        """Propagate priority change up to root."""
+        parent = (idx - 1) // 2
+        self.tree[parent] += change
+        if parent != 0:
+            self._propagate(parent, change)
+
+    def _retrieve(self, idx: int, value: float) -> int:
+        """Find leaf index for a given cumulative value."""
+        left = 2 * idx + 1
+        right = left + 1
+        if left >= len(self.tree):
+            return idx
+        if value <= self.tree[left]:
+            return self._retrieve(left, value)
+        else:
+            return self._retrieve(right, value - self.tree[left])
+
+    @property
+    def total(self) -> float:
+        return self.tree[0]
+
+    def add(self, priority: float, data):
+        """Add data with given priority."""
+        tree_idx = self.write_pos + self.capacity - 1
+        self.data[self.write_pos] = data
+        self.update(tree_idx, priority)
+        self.write_pos = (self.write_pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def update(self, tree_idx: int, priority: float):
+        """Update priority at tree index."""
+        change = priority - self.tree[tree_idx]
+        self.tree[tree_idx] = priority
+        self._propagate(tree_idx, change)
+
+    def get(self, value: float) -> Tuple[int, float, Any]:
+        """Get (tree_idx, priority, data) for a cumulative value."""
+        tree_idx = self._retrieve(0, value)
+        data_idx = tree_idx - self.capacity + 1
+        return tree_idx, self.tree[tree_idx], self.data[data_idx]
+
+    @property
+    def min_priority(self) -> float:
+        """Minimum non-zero priority among stored entries."""
+        leaves = self.tree[self.capacity - 1:self.capacity - 1 + self.size]
+        nonzero = leaves[leaves > 0]
+        return float(nonzero.min()) if len(nonzero) > 0 else 1.0
+
+
 class PrioritizedReplayBuffer:
     """
-    Prioritized Experience Replay buffer.
-    
+    Prioritized Experience Replay buffer using SumTree for O(log N) sampling.
+
     Samples experiences proportional to their TD error.
     High-error experiences are sampled more frequently.
-    
-    This buffer can be combined with regime-awareness:
-    - Store regime labels with experiences
-    - Use hybrid priority: TD-error weighted by regime sampling strategy
     """
-    
+
     def __init__(
         self,
         capacity: int,
@@ -406,35 +470,18 @@ class PrioritizedReplayBuffer:
         beta_start: float = 0.4,
         beta_frames: int = 100_000,
     ):
-        """
-        Parameters:
-        -----------
-        capacity : int
-            Maximum buffer size
-        alpha : float
-            How much to use priorities (0 = uniform, 1 = full priority)
-        beta_start : float
-            Initial importance sampling weight
-        beta_frames : int
-            Frames over which to anneal beta to 1.0
-        """
         self.capacity = capacity
         self.alpha = alpha
         self.beta_start = beta_start
         self.beta_frames = beta_frames
         self.frame = 1
-        
-        # Storage
-        self.buffer = []
-        self.priorities = np.zeros(capacity, dtype=np.float32)
-        self.pos = 0
+        self.tree = SumTree(capacity)
         self.max_priority = 1.0
-    
+
     @property
     def beta(self) -> float:
-        """Current beta for importance sampling."""
         return min(1.0, self.beta_start + (1.0 - self.beta_start) * self.frame / self.beta_frames)
-    
+
     def add(
         self,
         state: np.ndarray,
@@ -446,58 +493,63 @@ class PrioritizedReplayBuffer:
     ):
         """Add experience with maximum priority."""
         experience = (state, action, reward, next_state, done, regime)
-        
-        if len(self.buffer) < self.capacity:
-            self.buffer.append(experience)
-        else:
-            self.buffer[self.pos] = experience
-        
-        # New experiences get max priority
-        self.priorities[self.pos] = self.max_priority ** self.alpha
-        self.pos = (self.pos + 1) % self.capacity
-    
+        priority = self.max_priority ** self.alpha
+        self.tree.add(priority, experience)
+
     def sample(self, batch_size: int) -> Tuple:
         """
         Sample batch of experiences proportional to priorities.
-        
+
         Returns:
         --------
         tuple: (states, actions, rewards, next_states, dones, indices, weights)
         """
-        size = len(self.buffer)
-        
-        # Calculate sampling probabilities
-        priorities = self.priorities[:size]
-        probabilities = priorities / priorities.sum()
-        
-        # Sample indices
-        indices = np.random.choice(size, batch_size, p=probabilities, replace=False)
-        
-        # Calculate importance sampling weights
-        weights = (size * probabilities[indices]) ** (-self.beta)
-        weights = weights / weights.max()  # Normalize
-        
-        # Get experiences
-        batch = [self.buffer[i] for i in indices]
+        batch = []
+        tree_indices = []
+        priorities = []
+
+        segment = self.tree.total / batch_size
+
+        for i in range(batch_size):
+            lo = segment * i
+            hi = segment * (i + 1)
+            value = np.random.uniform(lo, hi)
+            tree_idx, priority, data = self.tree.get(value)
+            if data is None:
+                # Fallback: resample from full range
+                value = np.random.uniform(0, self.tree.total)
+                tree_idx, priority, data = self.tree.get(value)
+            batch.append(data)
+            tree_indices.append(tree_idx)
+            priorities.append(priority)
+
+        # Importance sampling weights
+        priorities_arr = np.array(priorities, dtype=np.float64)
+        min_prob = self.tree.min_priority / self.tree.total
+        max_weight = (self.tree.size * min_prob) ** (-self.beta)
+        sampling_probs = priorities_arr / self.tree.total
+        weights = (self.tree.size * sampling_probs) ** (-self.beta)
+        weights = weights / max_weight  # Normalize
+
         states = np.array([e[0] for e in batch])
         actions = np.array([e[1] for e in batch])
         rewards = np.array([e[2] for e in batch])
         next_states = np.array([e[3] for e in batch])
         dones = np.array([e[4] for e in batch])
-        
+
         self.frame += 1
-        
-        return states, actions, rewards, next_states, dones, indices, weights
-    
+
+        return states, actions, rewards, next_states, dones, np.array(tree_indices), weights.astype(np.float32)
+
     def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray):
         """Update priorities based on TD errors."""
         for idx, td_error in zip(indices, td_errors):
             priority = (abs(td_error) + 1e-6) ** self.alpha
-            self.priorities[idx] = priority
+            self.tree.update(int(idx), priority)
             self.max_priority = max(self.max_priority, priority)
-    
+
     def __len__(self) -> int:
-        return len(self.buffer)
+        return self.tree.size
 
 
 # =============================================================================
@@ -632,7 +684,7 @@ class RainbowAgent(BaseAgent):
         """Hardcoded defaults from your spec."""
         return {
             "learning_rate": 6.25e-5,
-            "buffer_size": 1_000_000,
+            "buffer_size": 200_000,
             "batch_size": 32,
             "gamma": 0.99,
             "n_steps": 3,
@@ -1031,7 +1083,7 @@ class RainbowAgent(BaseAgent):
             "config": self.config,
         }, f"{save_path}.pt")
         
-        print(f"✓ Rainbow model saved to {save_path}.pt")
+        print(f"[OK] Rainbow model saved to {save_path}.pt")
     
     def load(self, path: str, env: Optional[gym.Env] = None) -> "RainbowAgent":
         """Load model checkpoint."""
@@ -1046,7 +1098,7 @@ class RainbowAgent(BaseAgent):
         self.training_step = checkpoint["training_step"]
         self.episodes = checkpoint["episodes"]
         
-        print(f"✓ Rainbow model loaded from {path}.pt")
+        print(f"[OK] Rainbow model loaded from {path}.pt")
         return self
     
     def evaluate(self, env: gym.Env, n_episodes: int = 10, deterministic: bool = True) -> Dict[str, float]:
@@ -1089,7 +1141,7 @@ if __name__ == "__main__":
     # Test 1: Create agent
     print("\n[1] Creating Rainbow agent...")
     agent = RainbowAgent(env, device="cpu")
-    print(f"    ✓ Agent created")
+    print(f"    [OK] Agent created")
     print(f"    Observation dim: {agent.obs_dim}")
     print(f"    Number of actions: {agent.n_actions}")
     print(f"    N-atoms (C51): {agent.config.get('n_atoms')}")
@@ -1099,7 +1151,7 @@ if __name__ == "__main__":
     obs, _ = env.reset()
     action = agent.select_action(obs, training=True)
     print(f"    Action selected: {action}")
-    print(f"    ✓ Action selection works")
+    print(f"    [OK] Action selection works")
     
     # Test 3: Quick training
     print("\n[3] Quick training test (500 steps)...")
@@ -1110,13 +1162,13 @@ if __name__ == "__main__":
         eval_episodes=2,
     )
     print(f"    Episodes: {agent.episodes}")
-    print(f"    ✓ Training works")
+    print(f"    [OK] Training works")
     
     # Test 4: Save and load
     print("\n[4] Testing save/load...")
     agent.save("/tmp/test_rainbow")
     agent.load("/tmp/test_rainbow")
-    print(f"    ✓ Save/load works")
+    print(f"    [OK] Save/load works")
     
     # Test 5: Discrete wrapper
     print("\n[5] Testing DiscreteActionWrapper...")
@@ -1125,7 +1177,7 @@ if __name__ == "__main__":
     wrapped = DiscreteActionWrapper(cont_env, actions_per_asset=3)
     print(f"    Original action space: {cont_env.action_space}")
     print(f"    Wrapped action space: {wrapped.action_space}")
-    print(f"    ✓ Wrapper works")
+    print(f"    [OK] Wrapper works")
     
     print("\n" + "=" * 70)
     print("ALL TESTS PASSED!")

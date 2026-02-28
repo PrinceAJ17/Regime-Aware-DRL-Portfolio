@@ -54,6 +54,7 @@ from .regime_aware_buffer import (
     SamplingStrategy,
     RegimeExperience,
     RegimeAwareReplayBuffer,
+    RegimeAwarePrioritizedBuffer,
 )
 
 
@@ -64,4 +65,5 @@ __all__ = [
     'RegimeExperience',
     'StandardReplayBuffer',
     'RegimeAwareReplayBuffer',
+    'RegimeAwarePrioritizedBuffer',
 ]

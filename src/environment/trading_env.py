@@ -722,9 +722,10 @@ class TradingEnvironment(gym.Env):
         
         # Calculate reward
         reward = self._calculate_reward(prev_value, self.portfolio_value, transaction_cost)
-        
-        # Track returns for analysis
-        step_return = (self.portfolio_value - prev_value) / prev_value
+
+        # Net-of-cost step return for financial metrics (transaction costs deducted from return,
+        # even though portfolio_value itself is tracked gross — costs are a cash outflow).
+        step_return = (self.portfolio_value - transaction_cost - prev_value) / prev_value
         self.episode_returns.append(step_return)
         
         # Check termination conditions

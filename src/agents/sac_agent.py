@@ -98,7 +98,7 @@ class SACConfig:
     target_entropy: str = "auto"
     
     # Training frequency
-    train_freq: int = 1  # Update every step
+    train_freq: int = 4  # Update every 4 steps (125K gradient steps per 500K timesteps)
     gradient_steps: int = 1  # Gradient steps per update
     learning_starts: int = 10000  # Start learning after N steps
     
@@ -202,6 +202,15 @@ class RegimeAwareReplayBufferWrapper:
         self.action_space = env.action_space
         self.n_envs = 1
         self.optimize_memory_usage = False
+
+        # Cache torch device to avoid repeated CUDA checks
+        self._torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Convert regime cache to numpy for faster indexing
+        if self._regime_cache is not None:
+            self._regime_values = self._regime_cache.values
+        else:
+            self._regime_values = None
         
         # Buffer properties
         # Handle both possible attribute names
@@ -238,16 +247,15 @@ class RegimeAwareReplayBufferWrapper:
         if infos and len(infos) > 0 and 'regime' in infos[0]:
             regime_str = infos[0]['regime']
 
-        # Method 2: Use cached regime series + env step index
-        elif self._regime_cache is not None:
+        # Method 2: Use cached regime array + env step index
+        elif self._regime_values is not None:
             try:
                 current_step = self._get_env_step()
-                if current_step is not None and 0 <= current_step < len(self._regime_cache):
-                    regime_val = self._regime_cache.iloc[current_step]
+                if current_step is not None and 0 <= current_step < len(self._regime_values):
+                    regime_val = self._regime_values[current_step]
                     regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
                 else:
-                    # Step out of range, use last known regime
-                    regime_val = self._regime_cache.iloc[-1]
+                    regime_val = self._regime_values[-1]
                     regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
             except Exception:
                 if self.current_regime is not None:
@@ -262,10 +270,10 @@ class RegimeAwareReplayBufferWrapper:
 
         # Add to your buffer
         self.buffer.add(
-            state=obs.flatten() if obs.ndim > 1 else obs,
-            action=action.flatten() if action.ndim > 1 else action,
+            state=obs.ravel() if obs.ndim > 1 else obs,
+            action=action.ravel() if action.ndim > 1 else action,
             reward=float(reward),
-            next_state=next_obs.flatten() if next_obs.ndim > 1 else next_obs,
+            next_state=next_obs.ravel() if next_obs.ndim > 1 else next_obs,
             done=bool(done),
             regime=regime
         )
@@ -315,8 +323,8 @@ class RegimeAwareReplayBufferWrapper:
         if not SB3_AVAILABLE:
             raise ImportError("stable-baselines3 required")
         
-        # Get device
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Use cached device
+        device = self._torch_device
         
         # Convert to tensors
         observations = torch.as_tensor(batch['states'], device=device).float()
