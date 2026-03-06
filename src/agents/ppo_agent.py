@@ -486,16 +486,16 @@ class PPOAgent(BaseAgent):
         TrainingMetrics
             Training history
         """
-        self._log(f"Starting training for {training_config.total_timesteps} timesteps...")
-        
-        # Set up callbacks
-        callback_list = callbacks or []
-        
         # Handle direct total_timesteps argument
         if training_config is None and total_timesteps is not None:
             training_config = TrainingConfig(total_timesteps=total_timesteps)
         elif training_config is None:
             training_config = TrainingConfig()
+
+        self._log(f"Starting training for {training_config.total_timesteps} timesteps...")
+
+        # Set up callbacks
+        callback_list = callbacks or []
 
         # Add regime metrics callback if tracking
         if self.ppo_config.track_regime_metrics and self.regime_detector is not None:

@@ -67,24 +67,30 @@ def _load_single_run(result_dir: Path, manifest_entry: dict) -> Optional[dict]:
         "strategy": manifest_entry["strategy"],
         "seed": manifest_entry["seed"],
         "wall_time_seconds": manifest_entry.get("wall_time_seconds", 0),
+        "result_dir": manifest_entry.get("result_dir", ""),
     }
 
-    # Load eval results
+    # Load test results (primary out-of-sample metric, 2022-2023).
+    # Fall back to eval_results.json for older runs produced before the train/val/test split.
+    test_path = result_dir / "test_results.json"
     eval_path = result_dir / "eval_results.json"
-    if eval_path.exists():
-        with open(eval_path) as f:
-            eval_data = json.load(f)
-        row["mean_reward"] = eval_data.get("mean_reward")
-        row["std_reward"] = eval_data.get("std_reward")
-        row["sharpe_ratio"] = eval_data.get("sharpe_ratio")
-        row["max_drawdown"] = eval_data.get("max_drawdown")
-        row["cumulative_return"] = eval_data.get("cumulative_return")
-        row["sortino_ratio"] = eval_data.get("sortino_ratio")
+    metrics_path = test_path if test_path.exists() else eval_path
+    if metrics_path.exists():
+        with open(metrics_path) as f:
+            metrics_data = json.load(f)
+        row["mean_reward"] = metrics_data.get("mean_reward")
+        row["std_reward"] = metrics_data.get("std_reward")
+        row["sharpe_ratio"] = metrics_data.get("sharpe_ratio")
+        row["max_drawdown"] = metrics_data.get("max_drawdown")
+        row["cumulative_return"] = metrics_data.get("cumulative_return")
+        row["sortino_ratio"] = metrics_data.get("sortino_ratio")
 
-    # Load regime-specific results
+    # Load regime-specific results (prefer test split, fall back to val)
+    test_regime_path = result_dir / "test_regime_results.json"
     regime_path = result_dir / "regime_eval_results.json"
-    if regime_path.exists():
-        with open(regime_path) as f:
+    active_regime_path = test_regime_path if test_regime_path.exists() else regime_path
+    if active_regime_path.exists():
+        with open(active_regime_path) as f:
             regime_data = json.load(f)
         for regime in ["bull", "bear", "sideways"]:
             if regime in regime_data and regime_data[regime]:

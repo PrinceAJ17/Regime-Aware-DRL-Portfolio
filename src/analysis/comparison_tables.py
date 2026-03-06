@@ -154,11 +154,11 @@ def generate_e6_table(df: pd.DataFrame, output_dir: Path):
     # Load checkpoint metrics from files
     rows = []
     for _, run in e6.iterrows():
-        cp_path = Path(run.get("result_dir", run["run_id"])) / "checkpoint_metrics.json"
-        if not cp_path.exists():
-            # Try constructing path from run_id parts
-            result_dir = Path("results/experiments") / run["experiment"] / run["algorithm"] / run["strategy"] / run["run_id"]
-            cp_path = result_dir / "checkpoint_metrics.json"
+        result_dir_str = run.get("result_dir", "")
+        if result_dir_str:
+            cp_path = Path(result_dir_str) / "checkpoint_metrics.json"
+        else:
+            cp_path = Path("results/experiments") / run["experiment"] / run["algorithm"] / run["strategy"] / run["run_id"] / "checkpoint_metrics.json"
 
         if cp_path.exists():
             with open(cp_path) as f:

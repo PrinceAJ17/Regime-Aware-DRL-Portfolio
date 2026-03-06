@@ -147,6 +147,7 @@ def _create_rainbow(run_config, train_env, detector, is_regime_aware):
         replay_buffer=replay_buffer,
         seed=run_config.seed,
         verbose=0,
+        regime_detector=detector if is_regime_aware else None,
     )
 
 

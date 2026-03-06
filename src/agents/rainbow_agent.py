@@ -583,6 +583,7 @@ class RainbowAgent(BaseAgent):
         device: str = "auto",
         name: str = "rainbow_agent",
         verbose: int = 1,
+        regime_detector=None,
     ):
         """
         Initialize Rainbow agent.
@@ -619,6 +620,7 @@ class RainbowAgent(BaseAgent):
         
         # Store custom replay buffer
         self.custom_replay_buffer = replay_buffer
+        self.regime_detector = regime_detector
         
         # Load config
         if config is None:
@@ -1005,8 +1007,17 @@ class RainbowAgent(BaseAgent):
             next_state, reward, terminated, truncated, info = self.env.step(action)
             done = terminated or truncated
 
-            # Get regime if available
+            # Get regime label: prefer environment info, fall back to detector
             regime = info.get("regime", None)
+            if regime is None and self.regime_detector is not None:
+                try:
+                    price_data = getattr(self.env, "price_data", None) or getattr(
+                        getattr(self.env, "env", None), "price_data", None
+                    )
+                    if price_data is not None:
+                        regime = self.regime_detector.detect_current(price_data)
+                except Exception:
+                    pass
 
             # Store experience
             self.store_experience(state, action, reward, next_state, done, regime)

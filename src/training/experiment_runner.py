@@ -515,14 +515,17 @@ def _compute_financial_metrics(agent, eval_env, n_episodes: int = 5) -> dict:
 
     metrics = calculate_all_metrics(flat_returns)
 
-    # Convert numpy types
+    # Convert numpy types; drop non-finite values (NaN/Inf) to keep valid JSON
     result = {}
     for k, v in metrics.items():
         if isinstance(v, (np.floating, np.integer)):
-            result[k] = float(v)
-        elif isinstance(v, float) and np.isfinite(v):
-            result[k] = v
-        elif isinstance(v, (int, float)):
+            fv = float(v)
+            if np.isfinite(fv):
+                result[k] = fv
+        elif isinstance(v, float):
+            if np.isfinite(v):
+                result[k] = v
+        elif isinstance(v, int):
             result[k] = v
 
     return result

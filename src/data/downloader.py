@@ -533,16 +533,10 @@ def load_from_cache(
                     index_col=0,
                     parse_dates=True
                 )
-                #index_col=0: Use the first column (dates) as the DataFrame's index, not as a regular column.
-		        #parse_dates=True: Convert date strings like "2020-01-02" into actual datetime objects.
-		        #This is the reverse of what to_csv() did — we're restoring the original DataFrame structure.
                 results[ticker] = df
                 logger.info(f"Loaded {ticker} from cache ({len(df)} rows)")
-                #Add the loaded DataFrame to our results dictionary and log the success.
             except Exception as e:
                 logger.error(f"Error loading {ticker} from cache: {str(e)}")
-                #If something goes wrong (corrupted file, wrong format, etc.), log the error and continue.
-		        #Don't crash — just skip this ticker and try the next one.
         else:
             logger.debug(f"No cache found for {ticker}")
     

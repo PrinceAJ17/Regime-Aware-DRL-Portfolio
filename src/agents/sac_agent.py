@@ -616,16 +616,17 @@ class SACAgent(BaseAgent):
         TrainingMetrics
             Training history
         """
-        self._log(f"Starting training for {training_config.total_timesteps} timesteps...")
-        
-        # Set up callbacks
-        callback_list = callbacks or []
-        
         # Handle direct total_timesteps argument
         if training_config is None and total_timesteps is not None:
             training_config = TrainingConfig(total_timesteps=total_timesteps)
         elif training_config is None:
             training_config = TrainingConfig()
+
+        self._log(f"Starting training for {training_config.total_timesteps} timesteps...")
+
+        # Set up callbacks
+        callback_list = callbacks or []
+
         # Add regime tracking callback if using regime-aware replay
         if self.replay_wrapper is not None:
             regime_callback = RegimeTrackingCallback(
