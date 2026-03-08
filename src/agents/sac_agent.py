@@ -76,7 +76,7 @@ except ImportError:
     print("Warning: stable-baselines3 not installed. Install with: pip install stable-baselines3")
 
 # Import base class and configs
-from .base_agent import BaseAgent, TrainingConfig, TrainingMetrics
+from .base_agent import BaseAgent, TrainingConfig, TrainingMetrics, ReplayBufferWrapper
 
 
 @dataclass
@@ -131,241 +131,19 @@ class SACConfig:
         }
 
 
-class RegimeAwareReplayBufferWrapper:
-    """
-    Wrapper to make RegimeAwareReplayBuffer compatible with SB3.
-    
-    SB3 expects a specific interface for replay buffers.
-    This wrapper adapts your buffer to match that interface.
-    
-    WHY A WRAPPER?
-    ==============
-    
-    SB3's SAC expects methods like:
-    - buffer.add(obs, action, reward, next_obs, done, infos)
-    - buffer.sample(batch_size) -> ReplayBufferSamples
-    
-    Your buffer has:
-    - buffer.add(state, action, reward, next_state, done, regime)
-    - buffer.sample(batch_size, strategy) -> dict
-    
-    The wrapper translates between these interfaces.
-    """
-    
-    def __init__(
-        self,
-        regime_aware_buffer,
-        regime_detector,
-        env: gym.Env,
-        price_data=None,
-        strategy: str = "balanced"
-    ):
-        """
-        Initialize the wrapper.
-
-        Parameters:
-        -----------
-        regime_aware_buffer : RegimeAwareReplayBuffer
-            Your custom regime-aware buffer
-
-        regime_detector : UnifiedRegimeDetector
-            For detecting current market regime
-
-        env : gym.Env
-            The environment (needed for observation/action spaces)
-
-        price_data : pd.DataFrame or Dict, optional
-            Price data for regime detection
-
-        strategy : str
-            Sampling strategy to use
-        """
-        self.buffer = regime_aware_buffer
-        self.regime_detector = regime_detector
-        self.env = env
-        self.price_data = price_data
-        self.strategy = strategy
-
-        # Track current regime (updated during training)
-        self.current_regime = None
-
-        # Cache regime series to avoid recomputing on every step
-        self._regime_cache = None
-        if price_data is not None and regime_detector is not None:
-            try:
-                self._regime_cache = regime_detector.detect(price_data)
-            except Exception:
-                self._regime_cache = None
-        
-        # For SB3 compatibility
-        self.observation_space = env.observation_space
-        self.action_space = env.action_space
-        self.n_envs = 1
-        self.optimize_memory_usage = False
-
-        # Cache torch device to avoid repeated CUDA checks
-        self._torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Convert regime cache to numpy for faster indexing
-        if self._regime_cache is not None:
-            self._regime_values = self._regime_cache.values
-        else:
-            self._regime_values = None
-        
-        # Buffer properties
-        # Handle both possible attribute names
-        if hasattr(regime_aware_buffer, 'buffer_size'):
-            self.buffer_size = regime_aware_buffer.buffer_size
-        elif hasattr(regime_aware_buffer, 'total_buffer_size'):
-            self.buffer_size = regime_aware_buffer.total_buffer_size
-        else:
-            self.buffer_size = 1_000_000  # Default fallback
-        self.pos = 0
-        self.full = False
-    
-    def add(
-        self,
-        obs: np.ndarray,
-        next_obs: np.ndarray,
-        action: np.ndarray,
-        reward: np.ndarray,
-        done: np.ndarray,
-        infos: List[Dict[str, Any]]
-    ):
-        """
-        Add experience to buffer (SB3 interface).
-
-        This is called by SB3 after each environment step.
-        We detect the current regime and pass it to your buffer.
-        """
-        from ..replay.regime_aware_buffer import MarketRegime
-
-        # Determine regime - try multiple methods
-        regime_str = 'sideways'  # Default fallback
-
-        # Method 1: Check if environment provides regime in info
-        if infos and len(infos) > 0 and 'regime' in infos[0]:
-            regime_str = infos[0]['regime']
-
-        # Method 2: Use cached regime array + env step index
-        elif self._regime_values is not None:
-            try:
-                current_step = self._get_env_step()
-                if current_step is not None and 0 <= current_step < len(self._regime_values):
-                    regime_val = self._regime_values[current_step]
-                    regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
-                else:
-                    regime_val = self._regime_values[-1]
-                    regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
-            except Exception:
-                if self.current_regime is not None:
-                    regime_str = self.current_regime
-
-        # Method 3: Use cached regime from callback
-        elif self.current_regime is not None:
-            regime_str = self.current_regime
-
-        # Convert string to enum
-        regime = MarketRegime(regime_str)
-
-        # Add to your buffer
-        self.buffer.add(
-            state=obs.ravel() if obs.ndim > 1 else obs,
-            action=action.ravel() if action.ndim > 1 else action,
-            reward=float(reward),
-            next_state=next_obs.ravel() if next_obs.ndim > 1 else next_obs,
-            done=bool(done),
-            regime=regime
-        )
-
-        # Update position tracking (for SB3 compatibility)
-        self.pos = len(self.buffer)
-        self.full = self.buffer.is_full()
-
-    def _get_env_step(self) -> Optional[int]:
-        """Get the current step index from the environment."""
-        env = self.env
-        # Try direct attribute
-        if hasattr(env, 'current_step'):
-            return env.current_step
-        # VecEnv wrapped
-        if hasattr(env, 'envs') and hasattr(env.envs[0], 'current_step'):
-            return env.envs[0].current_step
-        # Unwrapped
-        if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'current_step'):
-            return env.unwrapped.current_step
-        return None
-    
-    def sample(self, batch_size: int, env=None) -> 'ReplayBufferSamples':
-        """
-        Sample from buffer (SB3 interface).
-        
-        This is where YOUR CONTRIBUTION happens!
-        Instead of uniform random sampling, we use your regime-aware strategy.
-        """
-        # Get current regime for current-focused strategy
-        current_regime = None
-        if self.strategy == 'current_focused' and self.current_regime is not None:
-            from ..replay.regime_aware_buffer import MarketRegime
-            current_regime = MarketRegime(self.current_regime)
-        
-        # Sample using your regime-aware buffer!
-        batch = self.buffer.sample(
-            batch_size=batch_size,
-            current_regime=current_regime
-        )
-        
-        # Convert to SB3 format
-        return self._to_sb3_samples(batch)
-    
-    def _to_sb3_samples(self, batch: Dict[str, np.ndarray]) -> 'ReplayBufferSamples':
-        """Convert your batch format to SB3's ReplayBufferSamples."""
-        if not SB3_AVAILABLE:
-            raise ImportError("stable-baselines3 required")
-        
-        # Use cached device
-        device = self._torch_device
-        
-        # Convert to tensors
-        observations = torch.as_tensor(batch['states'], device=device).float()
-        actions = torch.as_tensor(batch['actions'], device=device).float()
-        next_observations = torch.as_tensor(batch['next_states'], device=device).float()
-        rewards = torch.as_tensor(batch['rewards'], device=device).float().unsqueeze(1)
-        dones = torch.as_tensor(batch['dones'], device=device).float().unsqueeze(1)
-        
-        return ReplayBufferSamples(
-            observations=observations,
-            actions=actions,
-            next_observations=next_observations,
-            dones=dones,
-            rewards=rewards
-        )
-    
-    def set_current_regime(self, regime: str):
-        """Update current regime (called during training)."""
-        self.current_regime = regime
-    
-    def size(self) -> int:
-        """Return current buffer size."""
-        return len(self.buffer)
-    
-    def __len__(self) -> int:
-        return len(self.buffer)
-
-
 class RegimeTrackingCallback(BaseCallback):
     """
     Callback to track regime during training and update buffer.
-    
+
     This callback:
     1. Detects current market regime at each step
     2. Updates the replay buffer wrapper with current regime
     3. Logs regime distribution statistics
     """
-    
+
     def __init__(
         self,
-        replay_wrapper: RegimeAwareReplayBufferWrapper,
+        replay_wrapper: ReplayBufferWrapper,
         regime_detector,
         env,
         price_data=None,
@@ -556,12 +334,14 @@ class SACAgent(BaseAgent):
                 )
             
             # Wrap your buffer for SB3 compatibility
-            self.replay_wrapper = RegimeAwareReplayBufferWrapper(
-                regime_aware_buffer=self.replay_buffer,
+            self.replay_wrapper = ReplayBufferWrapper(
+                regime_buffer=self.replay_buffer,
+                observation_space=self.env.observation_space,
+                action_space=self.env.action_space,
+                device=self.model.device,
                 regime_detector=self.regime_detector,
-                env=self.env,
                 price_data=self._get_price_data_from_env(),
-                strategy=self.sac_config.replay_strategy
+                env=self.env,
             )
             
             # Replace SB3's buffer with our wrapper

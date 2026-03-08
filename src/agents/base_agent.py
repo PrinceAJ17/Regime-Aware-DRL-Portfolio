@@ -602,17 +602,24 @@ class BaseAgent(ABC):
 class ReplayBufferWrapper:
     """
     Wrapper to make RegimeAwareReplayBuffer compatible with Stable Baselines 3.
-    
+
     SB3 expects replay buffers to have specific methods and return formats.
     This wrapper adapts our RegimeAwareReplayBuffer to work with SB3's
     off-policy algorithms (SAC, TD3).
-    
-    Why this is needed:
-    -------------------
-    SB3's replay buffer returns samples as a named tuple with specific fields.
-    Our RegimeAwareReplayBuffer returns a dictionary.
-    This wrapper translates between the two formats.
-    
+
+    WHY A WRAPPER?
+    ==============
+
+    SB3 expects methods like:
+        - buffer.add(obs, action, reward, next_obs, done, infos)
+        - buffer.sample(batch_size) -> ReplayBufferSamples (named tuple)
+
+    Our RegimeAwareReplayBuffer has:
+        - buffer.add(state, action, reward, next_state, done, regime)
+        - buffer.sample(batch_size, current_regime) -> dict
+
+    This wrapper translates between these interfaces.
+
     Usage:
     ------
     >>> from src.replay.regime_aware_buffer import RegimeAwareReplayBuffer
@@ -620,7 +627,7 @@ class ReplayBufferWrapper:
     >>> wrapped = ReplayBufferWrapper(regime_buffer, env.observation_space, env.action_space)
     >>> # Now use wrapped as SB3's replay buffer
     """
-    
+
     def __init__(
         self,
         regime_buffer,
@@ -798,7 +805,14 @@ class ReplayBufferWrapper:
     
     def set_current_regime(self, regime) -> None:
         """Set the current market regime for sampling."""
-        self._current_regime = regime
+        from src.replay.regime_aware_buffer import MarketRegime
+        # Convert string to enum if needed
+        if isinstance(regime, str):
+            self._current_regime = MarketRegime(regime)
+        elif isinstance(regime, MarketRegime):
+            self._current_regime = regime
+        else:
+            self._current_regime = MarketRegime.SIDEWAYS
     
     def size(self) -> int:
         """Return current buffer size."""
