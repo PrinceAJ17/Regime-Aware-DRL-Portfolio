@@ -38,6 +38,8 @@ Usage
 """
 
 import logging
+import hashlib
+from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import numpy as np
@@ -49,6 +51,110 @@ import pandas_ta as ta
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Default cache directory for computed features
+DEFAULT_FEATURE_CACHE_DIR = Path("data/features_cache")
+
+
+# =============================================================================
+# FEATURE CACHING
+# =============================================================================
+
+def _get_cache_key(data: Dict[str, pd.DataFrame], **kwargs) -> str:
+    """Generate a unique cache key based on data shape and parameters."""
+    parts = []
+    for ticker in sorted(data.keys()):
+        df = data[ticker]
+        parts.append(f"{ticker}_{len(df)}_{df.index.min().date()}_{df.index.max().date()}")
+    params = "_".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
+    content = "|".join(parts) + "|" + params
+    return hashlib.md5(content.encode()).hexdigest()[:16]
+
+
+def save_features_to_cache(
+    features: Dict[str, pd.DataFrame],
+    cache_key: str,
+    cache_dir: Union[str, Path] = DEFAULT_FEATURE_CACHE_DIR
+) -> Path:
+    """Save computed features to disk cache."""
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"features_{cache_key}.parquet"
+
+    # Combine all features into one DataFrame with ticker prefix
+    combined = pd.concat(
+        {ticker: df for ticker, df in features.items()},
+        axis=1
+    )
+    combined.to_parquet(cache_path)
+    logger.info(f"Cached features to {cache_path}")
+    return cache_path
+
+
+def load_features_from_cache(
+    cache_key: str,
+    tickers: List[str],
+    cache_dir: Union[str, Path] = DEFAULT_FEATURE_CACHE_DIR
+) -> Optional[Dict[str, pd.DataFrame]]:
+    """Load cached features from disk. Returns None if cache miss."""
+    cache_dir = Path(cache_dir)
+    cache_path = cache_dir / f"features_{cache_key}.parquet"
+
+    if not cache_path.exists():
+        return None
+
+    try:
+        combined = pd.read_parquet(cache_path)
+        features = {}
+        for ticker in tickers:
+            if ticker in combined.columns.get_level_values(0):
+                features[ticker] = combined[ticker]
+        if len(features) == len(tickers):
+            logger.info(f"Loaded features from cache: {cache_path}")
+            return features
+    except Exception as e:
+        logger.warning(f"Failed to load feature cache: {e}")
+    return None
+
+
+def get_or_calculate_features(
+    data: Dict[str, pd.DataFrame],
+    benchmark_ticker: str = 'SPY',
+    normalise: bool = True,
+    normalisation_window: int = 60,
+    use_cache: bool = True,
+    cache_dir: Union[str, Path] = DEFAULT_FEATURE_CACHE_DIR
+) -> Dict[str, pd.DataFrame]:
+    """
+    Get features from cache or calculate them.
+
+    This is the preferred function for batch experiments - it avoids
+    recalculating features repeatedly for the same data.
+    """
+    cache_key = _get_cache_key(
+        data,
+        benchmark=benchmark_ticker,
+        normalise=normalise,
+        norm_window=normalisation_window
+    )
+
+    if use_cache:
+        cached = load_features_from_cache(cache_key, list(data.keys()), cache_dir)
+        if cached is not None:
+            return cached
+
+    # Calculate features
+    features = calculate_all_features(
+        data,
+        benchmark_ticker=benchmark_ticker,
+        normalise=normalise,
+        normalisation_window=normalisation_window
+    )
+
+    if use_cache:
+        save_features_to_cache(features, cache_key, cache_dir)
+
+    return features
 
 
 # =============================================================================
