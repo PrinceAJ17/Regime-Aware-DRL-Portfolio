@@ -212,6 +212,7 @@ def main():
     parser.add_argument("--experiments", nargs="+", default=["replay_comparison"])
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--timesteps", type=int, default=None)
+    parser.add_argument("--retry-failed", action="store_true", help="Retry failed runs")
     parser.add_argument("--kill", action="store_true", help="Kill running experiment process")
     parser.add_argument("--status", action="store_true", help="Show process status")
     args = parser.parse_args()
@@ -259,6 +260,8 @@ def main():
     ]
     if args.timesteps:
         cmd += ["--timesteps", str(args.timesteps)]
+    if getattr(args, 'retry_failed', False):
+        cmd += ["--retry-failed"]
 
     log_f = open(log_file, "w", encoding="utf-8")
     log_f.write(f"Started: {datetime.now().isoformat()}\n")
