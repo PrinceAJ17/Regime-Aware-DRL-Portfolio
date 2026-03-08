@@ -300,7 +300,7 @@ def execute_single_run(run_config_dict: dict) -> dict:
     from .run_config import RunConfig
     from .agent_factory import create_agent, create_training_config
     from src.data.downloader import download_ohlcv_data
-    from src.data.features import calculate_all_features
+    from src.data.features import get_or_calculate_features
     from src.environment.trading_env import TradingEnvironment
     from src.regime import UnifiedRegimeDetector
 
@@ -319,21 +319,20 @@ def execute_single_run(run_config_dict: dict) -> dict:
         #    - test_price_data  : 2022-2023  (held-out, primary reported metric)
         # Cache is keyed by ticker filename only, so each split must use its own
         # subdirectory to prevent the val/test requests hitting the training cache.
-        print("Loading data splits...")
         train_price_data = download_ohlcv_data(
-            TICKERS, "2010-01-01", "2019-12-31", cache_dir="data/raw/training", cache_expiry_days=365
+            TICKERS, "2010-01-01", "2019-12-31", cache_dir="data/raw/training", cache_expiry_days=365, quiet=True
         )
         val_price_data = download_ohlcv_data(
-            TICKERS, "2020-01-01", "2021-12-31", cache_dir="data/raw/validation", cache_expiry_days=365
+            TICKERS, "2020-01-01", "2021-12-31", cache_dir="data/raw/validation", cache_expiry_days=365, quiet=True
         )
         test_price_data = download_ohlcv_data(
-            TICKERS, "2022-01-01", "2023-12-31", cache_dir="data/raw/testing", cache_expiry_days=365
+            TICKERS, "2022-01-01", "2023-12-31", cache_dir="data/raw/testing", cache_expiry_days=365, quiet=True
         )
 
-        # 2. Calculate features for each split separately
-        train_features = calculate_all_features(train_price_data)
-        val_features   = calculate_all_features(val_price_data)
-        test_features  = calculate_all_features(test_price_data)
+        # 2. Calculate features for each split (cached to disk)
+        train_features = get_or_calculate_features(train_price_data, cache_dir="data/features_cache/training")
+        val_features   = get_or_calculate_features(val_price_data, cache_dir="data/features_cache/validation")
+        test_features  = get_or_calculate_features(test_price_data, cache_dir="data/features_cache/testing")
 
         # E4: reduced feature set applied to all splits equally
         if run_config.experiment == "feature_ablation" and run_config.feature_set == "reduced":
