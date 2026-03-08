@@ -65,6 +65,48 @@ except ImportError:
     REGIME_BUFFER_AVAILABLE = False
 
 
+class TD3RegimeCallback(BaseCallback):
+    """Callback to update current regime for TD3's regime-aware replay buffer."""
+
+    def __init__(self, replay_wrapper, regime_detector, price_data, env, verbose=0):
+        super().__init__(verbose)
+        self.replay_wrapper = replay_wrapper
+        self.regime_detector = regime_detector
+        self.price_data = price_data
+        self._env = env
+        # Cache regime series to avoid recomputing on every step
+        self._regime_cache = None
+        if regime_detector is not None and price_data is not None:
+            try:
+                self._regime_cache = regime_detector.detect(price_data)
+            except Exception:
+                pass
+
+    def _on_step(self) -> bool:
+        regime = 'sideways'
+        try:
+            # Get current step from environment
+            env = self._env
+            current_step = None
+            if hasattr(env, 'current_step'):
+                current_step = env.current_step
+            elif hasattr(env, 'envs') and hasattr(env.envs[0], 'current_step'):
+                current_step = env.envs[0].current_step
+            elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'current_step'):
+                current_step = env.unwrapped.current_step
+
+            # Use cached regime series for O(1) lookup
+            if self._regime_cache is not None and current_step is not None:
+                if 0 <= current_step < len(self._regime_cache):
+                    regime_val = self._regime_cache.iloc[current_step]
+                    regime = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+        except Exception:
+            pass
+
+        self.replay_wrapper.set_current_regime(regime)
+        return True
+
+
 class TD3Agent(BaseAgent):
     """
     TD3 Agent wrapper with support for regime-aware replay.
@@ -330,6 +372,7 @@ class TD3Agent(BaseAgent):
                 self.replay_buffer,
                 observation_space=self.env.observation_space,
                 action_space=self.env.action_space,
+                device=model.device,
                 regime_detector=self.regime_detector,
                 price_data=self._get_price_data_from_env(),
                 env=self.env,
@@ -413,6 +456,17 @@ class TD3Agent(BaseAgent):
         # Add user callback
         if callback is not None:
             cb_list.append(callback)
+
+        # Add regime callback for regime-aware replay buffer
+        if hasattr(self.model, 'replay_buffer') and isinstance(self.model.replay_buffer, ReplayBufferWrapper):
+            regime_cb = TD3RegimeCallback(
+                replay_wrapper=self.model.replay_buffer,
+                regime_detector=self.regime_detector,
+                price_data=self._get_price_data_from_env(),
+                env=self.env,
+                verbose=self.verbose,
+            )
+            cb_list.append(regime_cb)
 
         # Add evaluation callback
         if eval_env is not None:

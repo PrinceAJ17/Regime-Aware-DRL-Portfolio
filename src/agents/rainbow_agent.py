@@ -995,6 +995,18 @@ class RainbowAgent(BaseAgent):
         state, _ = self.env.reset()
         episode_reward = 0
 
+        # Cache regime series for O(1) lookups instead of recomputing every step
+        _regime_cache = None
+        if self.regime_detector is not None:
+            try:
+                price_data = getattr(self.env, "price_data", None) or getattr(
+                    getattr(self.env, "env", None), "price_data", None
+                )
+                if price_data is not None:
+                    _regime_cache = self.regime_detector.detect(price_data)
+            except Exception:
+                pass
+
         try:
             from tqdm import tqdm
             iterator = tqdm(range(total_timesteps), disable=not progress_bar)
@@ -1007,15 +1019,20 @@ class RainbowAgent(BaseAgent):
             next_state, reward, terminated, truncated, info = self.env.step(action)
             done = terminated or truncated
 
-            # Get regime label: prefer environment info, fall back to detector
+            # Get regime label: prefer environment info, fall back to cached detector
             regime = info.get("regime", None)
-            if regime is None and self.regime_detector is not None:
+            if regime is None and _regime_cache is not None:
                 try:
-                    price_data = getattr(self.env, "price_data", None) or getattr(
-                        getattr(self.env, "env", None), "price_data", None
-                    )
-                    if price_data is not None:
-                        regime = self.regime_detector.detect_current(price_data)
+                    # Get current step from environment
+                    current_step = getattr(self.env, "current_step", None)
+                    if current_step is None:
+                        env_inner = getattr(self.env, "env", None)
+                        if env_inner:
+                            current_step = getattr(env_inner, "current_step", None)
+
+                    if current_step is not None and 0 <= current_step < len(_regime_cache):
+                        regime_val = _regime_cache.iloc[current_step]
+                        regime = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
                 except Exception:
                     pass
 
