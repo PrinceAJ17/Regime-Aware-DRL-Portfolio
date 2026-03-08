@@ -12,6 +12,16 @@ import argparse
 from datetime import datetime, timedelta
 from collections import Counter
 
+# Experiment name to number mapping
+EXPERIMENT_NUMBERS = {
+    "replay_comparison": "E1",
+    "regime_performance": "E2",
+    "robustness": "E3",
+    "feature_ablation": "E4",
+    "regime_detection": "E5",
+    "sample_efficiency": "E6",
+}
+
 
 def _is_pid_alive(pid: int) -> bool:
     """Cross-platform check if a PID is alive."""
@@ -82,8 +92,35 @@ def _load_run_metrics(result_dir: str) -> dict:
 
 def _print_status(pid_file: pathlib.Path, log_file: pathlib.Path) -> None:
     W = 70
+
+    # --- Manifest (load early to get experiment name) ---
+    m = pathlib.Path("results/experiments/manifest.json")
+    if not m.exists():
+        print("=" * W)
+        print("  EXPERIMENT STATUS")
+        print("=" * W)
+        print("  Manifest: not found")
+        print("=" * W)
+        return
+
+    data    = json.loads(m.read_text(encoding="utf-8"))
+    runs    = data.get("runs", [])
+
+    # Detect experiment name(s) from pending/running runs, fallback to all runs
+    pending_or_running = [r for r in runs if r["status"] in ("pending", "running")]
+    source_runs = pending_or_running if pending_or_running else runs
+    exp_names = sorted(set(r.get("experiment", "unknown") for r in source_runs))
+
+    # Build label with experiment numbers (e.g., "E2: REGIME PERFORMANCE")
+    def format_exp(name):
+        num = EXPERIMENT_NUMBERS.get(name, "")
+        label = name.upper().replace("_", " ")
+        return f"{num}: {label}" if num else label
+
+    exp_label = ", ".join(format_exp(n) for n in exp_names) if exp_names else "EXPERIMENT"
+
     print("=" * W)
-    print("  E1 EXPERIMENT STATUS")
+    print(f"  {exp_label} STATUS")
     print("=" * W)
 
     # --- Process ---
@@ -96,16 +133,6 @@ def _print_status(pid_file: pathlib.Path, log_file: pathlib.Path) -> None:
         print(f"  Process : PID {pid}  [{state}]")
     else:
         print("  Process : no experiment tracked")
-
-    # --- Manifest ---
-    m = pathlib.Path("results/experiments/manifest.json")
-    if not m.exists():
-        print("  Manifest: not found")
-        print("=" * W)
-        return
-
-    data    = json.loads(m.read_text(encoding="utf-8"))
-    runs    = data.get("runs", [])
     total   = len(runs)
     counts  = Counter(r["status"] for r in runs)
     n_done  = counts.get("completed", 0)
