@@ -119,6 +119,9 @@ def _print_status(pid_file: pathlib.Path, log_file: pathlib.Path) -> None:
 
     exp_label = ", ".join(format_exp(n) for n in exp_names) if exp_names else "EXPERIMENT"
 
+    # Filter runs to only show current experiment(s)
+    runs = [r for r in runs if r.get("experiment") in exp_names]
+
     print("=" * W)
     print(f"  {exp_label} STATUS")
     print("=" * W)
