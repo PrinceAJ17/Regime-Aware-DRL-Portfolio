@@ -598,7 +598,8 @@ def download_ohlcv_data(
     cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR,
     use_cache: bool = True,
     cache_expiry_days: int = DEFAULT_CACHE_EXPIRY_DAYS,
-    force_download: bool = False
+    force_download: bool = False,
+    quiet: bool = False
 ) -> Dict[str, pd.DataFrame]:
     """
     Download OHLCV data with intelligent caching.
@@ -713,8 +714,9 @@ def download_ohlcv_data(
     
     # Download any missing/stale tickers
     if tickers_to_download:
-        print(f"\nDownloading {len(tickers_to_download)} ticker(s) from Yahoo Finance...")
-        print(f"Date range: {start_date} to {end_date}\n")
+        if not quiet:
+            print(f"\nDownloading {len(tickers_to_download)} ticker(s) from Yahoo Finance...")
+            print(f"Date range: {start_date} to {end_date}\n")
         
         downloaded_data = download_multiple_tickers(
             tickers=tickers_to_download,
@@ -733,19 +735,20 @@ def download_ohlcv_data(
     all_data = {**cached_data, **downloaded_data} #The ** operator "unpacks" a dictionary. So this combines all the data together. Merging two dictionaries into 1.
     
     # Report what we ended up with
-    print(f"\n{'='*50}")
-    print(f"Data Summary")
-    print(f"{'='*50}")
-    
-    for ticker in tickers:
-        if ticker in all_data:
-            df = all_data[ticker]
-            print(f"{ticker}: {len(df):,} trading days " #The :, adds commas to large numbers: 1006 becomes 1,006 1000000 becomes 1,000,000
-                  f"({df.index.min().date()} to {df.index.max().date()})")
-        else:
-            print(f"{ticker}: FAILED TO LOAD")
-    
-    print(f"{'='*50}\n")
+    if not quiet:
+        print(f"\n{'='*50}")
+        print(f"Data Summary")
+        print(f"{'='*50}")
+
+        for ticker in tickers:
+            if ticker in all_data:
+                df = all_data[ticker]
+                print(f"{ticker}: {len(df):,} trading days "
+                      f"({df.index.min().date()} to {df.index.max().date()})")
+            else:
+                print(f"{ticker}: FAILED TO LOAD")
+
+        print(f"{'='*50}\n")
     
     return all_data
 
