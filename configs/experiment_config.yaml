@@ -146,11 +146,11 @@ experiments:
         - inverse_frequency
     
     fixed:
-      algorithm: "sac"  # Use one algorithm to reduce compute
+      algorithm: "td3"  # TD3 works well with regime-aware replay (SAC doesn't)
       total_timesteps: 500_000
-    
+
     seeds: [42, 123, 456]
-    
+
     metrics:
       - sharpe_ratio
       - sharpe_ratio_degradation  # % decrease from no-noise baseline

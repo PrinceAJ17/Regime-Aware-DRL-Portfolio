@@ -107,14 +107,14 @@ def generate_e2_runs() -> List[RunConfig]:
 
 
 def generate_e3_runs() -> List[RunConfig]:
-    """E3: Robustness to Detection Noise (SAC only) — 36 runs."""
+    """E3: Robustness to Detection Noise (TD3 only) — 36 runs."""
     runs = []
     for noise in [0.0, 0.1, 0.2, 0.3]:
         for strategy in ["standard", "balanced", "inverse_frequency"]:
             for seed in [42, 123, 456]:
                 runs.append(RunConfig(
                     experiment="robustness",
-                    algorithm="sac",
+                    algorithm="td3",
                     strategy=strategy,
                     seed=seed,
                     total_timesteps=500_000,
