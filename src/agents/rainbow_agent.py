@@ -639,7 +639,8 @@ class RainbowAgent(BaseAgent):
         self.n_step_buffer = deque(maxlen=self.n_steps)
         
         # Call parent init (this calls _setup_model)
-        super().__init__(env, name=name, config=config, replay_buffer=replay_buffer, verbose=verbose)
+        super().__init__(env, name=name, config=config, replay_buffer=replay_buffer,
+                         verbose=verbose, regime_detector=regime_detector)
         
     def _setup_model(self) -> None:
         """Set up the Rainbow DQN model (networks, optimizer, buffer)."""

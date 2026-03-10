@@ -76,7 +76,7 @@ def _create_ppo(run_config, train_env, detector, is_regime_aware):
         env=train_env,
         name=run_config.run_id,
         ppo_config=ppo_config,
-        regime_detector=detector if is_regime_aware else None,
+        regime_detector=detector,  # Always pass for regime evaluation
         verbose=0,
     )
 
@@ -147,7 +147,7 @@ def _create_rainbow(run_config, train_env, detector, is_regime_aware):
         replay_buffer=replay_buffer,
         seed=run_config.seed,
         verbose=0,
-        regime_detector=detector if is_regime_aware else None,
+        regime_detector=detector,  # Always pass for regime evaluation
     )
 
 
