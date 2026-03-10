@@ -347,17 +347,21 @@ def execute_single_run(run_config_dict: dict) -> dict:
             episode_length=252,
             random_start=True,
         )
+        # Use full period length for val/test to ensure all regimes are covered
+        val_episode_length = len(val_price_data[list(val_price_data.keys())[0]]) - 1
+        test_episode_length = len(test_price_data[list(test_price_data.keys())[0]]) - 1
+
         val_env = TradingEnvironment(
             price_data=val_price_data,
             feature_data=val_features,
-            episode_length=252,
+            episode_length=val_episode_length,
             random_start=False,
             start_idx=0,
         )
         test_env = TradingEnvironment(
             price_data=test_price_data,
             feature_data=test_features,
-            episode_length=252,
+            episode_length=test_episode_length,
             random_start=False,
             start_idx=0,
         )
@@ -396,7 +400,9 @@ def execute_single_run(run_config_dict: dict) -> dict:
 
         # 8. Evaluate on VALIDATION set (2020-2021) — generalisation check
         val_results = agent.evaluate(val_env, n_episodes=10)
-        val_financial = _compute_financial_metrics(agent, val_env, n_episodes=5)
+        val_financial, val_episode_data = _collect_episode_data(
+            agent, val_env, regime_detector=detector, price_data=val_price_data, n_episodes=5
+        )
         val_results.update(val_financial)
 
         val_regime_results = {}
@@ -407,7 +413,9 @@ def execute_single_run(run_config_dict: dict) -> dict:
 
         # 9. Evaluate on TEST set (2022-2023) — PRIMARY out-of-sample metric
         test_results = agent.evaluate(test_env, n_episodes=10)
-        test_financial = _compute_financial_metrics(agent, test_env, n_episodes=5)
+        test_financial, test_episode_data = _collect_episode_data(
+            agent, test_env, regime_detector=detector, price_data=test_price_data, n_episodes=5
+        )
         test_results.update(test_financial)
 
         test_regime_results = {}
@@ -439,6 +447,13 @@ def execute_single_run(run_config_dict: dict) -> dict:
 
         with open(output_dir / "test_regime_results.json", "w") as f:
             json.dump(test_regime_results, f, indent=2, default=_json_serialisable)
+
+        # Save episode-level data for equity curves and weight visualizations
+        with open(output_dir / "val_episode_data.json", "w") as f:
+            json.dump(val_episode_data, f, default=_json_serialisable)
+
+        with open(output_dir / "test_episode_data.json", "w") as f:
+            json.dump(test_episode_data, f, default=_json_serialisable)
 
         # Keep eval_results.json pointing to val for backwards compat with analysis scripts
         with open(output_dir / "eval_results.json", "w") as f:
@@ -480,8 +495,13 @@ def execute_single_run(run_config_dict: dict) -> dict:
         return {"run_id": run_id, "status": "failed", "wall_time": wall_time, "error": error_msg}
 
 
-def _compute_financial_metrics(agent, eval_env, n_episodes: int = 5) -> dict:
-    """Run evaluation episodes and compute financial metrics (Sharpe, MDD, etc.).
+def _collect_episode_data(agent, eval_env, regime_detector=None, price_data=None, n_episodes: int = 5) -> tuple:
+    """Run evaluation episodes, compute metrics, AND collect raw episode data.
+
+    Returns both aggregate financial metrics and per-step data for visualizations:
+    - Daily portfolio values (for equity curves)
+    - Daily portfolio weights (for allocation analysis)
+    - Daily regime labels (for regime-aligned analysis)
 
     Uses info['step_return'] (net-of-transaction-cost portfolio return) rather than
     the shaped RL reward, so that Sharpe/Sortino/MDD reflect actual financial performance
@@ -489,45 +509,107 @@ def _compute_financial_metrics(agent, eval_env, n_episodes: int = 5) -> dict:
     """
     from src.utils.metrics import calculate_all_metrics
 
+    # Aggregate data across episodes
     all_episode_returns = []
+
+    # Per-episode raw data for visualizations
+    episode_data = {
+        "portfolio_values": [],      # List of lists: [[ep1_vals], [ep2_vals], ...]
+        "portfolio_weights": [],     # List of lists of weight arrays
+        "step_returns": [],          # List of lists
+        "dates": [],                 # List of lists
+        "regime_labels": [],         # List of lists (if detector available)
+    }
+
+    # Pre-compute regime labels if detector available
+    regime_series = None
+    if regime_detector is not None and price_data is not None:
+        try:
+            regime_series = regime_detector.detect(price_data)
+        except Exception:
+            pass
 
     for _ in range(n_episodes):
         obs, info = eval_env.reset()
         episode_returns = []
+        episode_values = []
+        episode_weights = []
+        episode_dates = []
+        episode_regimes = []
         done = False
+
+        # Get initial values
+        if hasattr(eval_env, 'portfolio_value'):
+            episode_values.append(float(eval_env.portfolio_value))
+        if hasattr(eval_env, 'portfolio_weights'):
+            episode_weights.append(eval_env.portfolio_weights.tolist())
 
         while not done:
             action, _ = agent.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = eval_env.step(action)
-            # Use actual net-of-cost portfolio return, not the shaped RL reward.
-            # step_return = (portfolio_value - transaction_cost - prev_value) / prev_value
+
+            # Collect step data
             step_return = info.get("step_return", reward)
-            episode_returns.append(step_return)
+            episode_returns.append(float(step_return))
+
+            portfolio_value = info.get("portfolio_value")
+            if portfolio_value is not None:
+                episode_values.append(float(portfolio_value))
+
+            portfolio_weights = info.get("portfolio_weights")
+            if portfolio_weights is not None:
+                episode_weights.append(portfolio_weights.tolist() if hasattr(portfolio_weights, 'tolist') else list(portfolio_weights))
+
+            date = info.get("date")
+            if date is not None:
+                episode_dates.append(str(date))
+
+                # Get regime label for this date if available
+                if regime_series is not None:
+                    try:
+                        date_key = pd.Timestamp(date)
+                        if date_key in regime_series.index:
+                            regime = regime_series.loc[date_key]
+                            regime_str = regime.value if hasattr(regime, 'value') else str(regime)
+                            episode_regimes.append(regime_str)
+                        else:
+                            episode_regimes.append("unknown")
+                    except Exception:
+                        episode_regimes.append("unknown")
+
             done = terminated or truncated
 
         all_episode_returns.append(episode_returns)
+        episode_data["portfolio_values"].append(episode_values)
+        episode_data["portfolio_weights"].append(episode_weights)
+        episode_data["step_returns"].append(episode_returns)
+        episode_data["dates"].append(episode_dates)
+        if episode_regimes:
+            episode_data["regime_labels"].append(episode_regimes)
 
-    # Compute metrics on the concatenated returns from all episodes
+    # Compute aggregate metrics
     flat_returns = np.concatenate(all_episode_returns)
-    if len(flat_returns) < 2:
-        return {}
+    metrics = {}
+    if len(flat_returns) >= 2:
+        raw_metrics = calculate_all_metrics(flat_returns)
+        for k, v in raw_metrics.items():
+            if isinstance(v, (np.floating, np.integer)):
+                fv = float(v)
+                if np.isfinite(fv):
+                    metrics[k] = fv
+            elif isinstance(v, float):
+                if np.isfinite(v):
+                    metrics[k] = v
+            elif isinstance(v, int):
+                metrics[k] = v
 
-    metrics = calculate_all_metrics(flat_returns)
+    return metrics, episode_data
 
-    # Convert numpy types; drop non-finite values (NaN/Inf) to keep valid JSON
-    result = {}
-    for k, v in metrics.items():
-        if isinstance(v, (np.floating, np.integer)):
-            fv = float(v)
-            if np.isfinite(fv):
-                result[k] = fv
-        elif isinstance(v, float):
-            if np.isfinite(v):
-                result[k] = v
-        elif isinstance(v, int):
-            result[k] = v
 
-    return result
+def _compute_financial_metrics(agent, eval_env, n_episodes: int = 5) -> dict:
+    """Backwards-compatible wrapper that returns only metrics."""
+    metrics, _ = _collect_episode_data(agent, eval_env, n_episodes=n_episodes)
+    return metrics
 
 
 def _reduce_features(feature_data: dict) -> dict:
