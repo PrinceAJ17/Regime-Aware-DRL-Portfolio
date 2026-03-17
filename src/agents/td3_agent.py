@@ -107,6 +107,94 @@ class TD3RegimeCallback(BaseCallback):
         return True
 
 
+class TD3TDErrorUpdateCallback(BaseCallback):
+    """
+    Callback to compute TD errors and update adaptive sampling weights for TD3.
+
+    For TD3: TD error = |Q(s,a) - (r + γ * (1-d) * Q(s', π(s')))|
+
+    This callback periodically computes TD errors for samples in the buffer
+    and updates the regime-level TD error statistics used by adaptive sampling.
+    """
+
+    def __init__(
+        self,
+        replay_wrapper,
+        update_freq: int = 100,
+        batch_size: int = 256,
+        gamma: float = 0.99,
+        verbose: int = 0
+    ):
+        super().__init__(verbose)
+        self.replay_wrapper = replay_wrapper
+        self.update_freq = update_freq
+        self.batch_size = batch_size
+        self.gamma = gamma
+        self._n_calls = 0
+
+    def _on_step(self) -> bool:
+        """Compute and update TD errors periodically."""
+        self._n_calls += 1
+
+        # Only update every N steps
+        if self._n_calls % self.update_freq != 0:
+            return True
+
+        # Need enough samples
+        if len(self.replay_wrapper) < self.batch_size:
+            return True
+
+        try:
+            self._compute_and_update_td_errors()
+        except Exception as e:
+            if self.verbose > 0:
+                print(f"TD3 TD error update failed: {e}")
+
+        return True
+
+    def _compute_and_update_td_errors(self):
+        """Compute TD errors for a batch and update the buffer."""
+        import torch
+        import numpy as np
+
+        model = self.model  # SB3 model (TD3)
+        device = model.device
+
+        # Sample a batch (this also stores regime info in replay_wrapper)
+        batch = self.replay_wrapper.sample(self.batch_size)
+
+        with torch.no_grad():
+            observations = batch.observations
+            actions = batch.actions
+            next_observations = batch.next_observations
+            rewards = batch.rewards
+            dones = batch.dones
+
+            # Compute Q(s, a) from both critics, take minimum
+            q1, q2 = model.critic(observations, actions)
+            q_values = torch.min(q1, q2)
+
+            # Compute Q(s', π(s')) using target networks
+            # TD3 adds noise to target actions
+            noise = torch.randn_like(actions) * model.target_policy_noise
+            noise = noise.clamp(-model.target_noise_clip, model.target_noise_clip)
+
+            next_actions = model.actor_target(next_observations) + noise
+            next_actions = next_actions.clamp(-1, 1)
+
+            q1_next, q2_next = model.critic_target(next_observations, next_actions)
+            q_next = torch.min(q1_next, q2_next)
+
+            # Compute TD target: r + γ * (1-d) * Q(s', π(s'))
+            td_target = rewards + self.gamma * (1 - dones) * q_next
+
+            # TD error = |Q(s,a) - TD_target|
+            td_errors = torch.abs(q_values - td_target).squeeze()
+
+            # Update the buffer with these TD errors
+            self.replay_wrapper.update_td_errors(td_errors.cpu().numpy())
+
+
 class TD3Agent(BaseAgent):
     """
     TD3 Agent wrapper with support for regime-aware replay.
@@ -329,15 +417,19 @@ class TD3Agent(BaseAgent):
                 policy_kwargs["activation_fn"] = torch.nn.Tanh
         
         # Create model
+        # Store hyperparameters for later use (e.g., TD error callback)
+        self._batch_size = self.config.get("batch_size", 256)
+        self._gamma = self.config.get("gamma", 0.99)
+
         self.model = TD3(
             policy="MlpPolicy",
             env=self.env,
             learning_rate=self.config.get("learning_rate", 3e-4),
             buffer_size=self.config.get("buffer_size", 1_000_000),
             learning_starts=self.config.get("learning_starts", 10_000),
-            batch_size=self.config.get("batch_size", 256),
+            batch_size=self._batch_size,
             tau=self.config.get("tau", 0.005),
-            gamma=self.config.get("gamma", 0.99),
+            gamma=self._gamma,
             train_freq=self.config.get("train_freq", 1),
             gradient_steps=self.config.get("gradient_steps", 1),
             policy_delay=self.config.get("policy_delay", 2),
@@ -468,6 +560,18 @@ class TD3Agent(BaseAgent):
             )
             cb_list.append(regime_cb)
 
+            # Add TD error update callback for adaptive sampling
+            if self.replay_buffer is not None and hasattr(self.replay_buffer, 'strategy'):
+                if self.replay_buffer.strategy.value == 'adaptive':
+                    td_cb = TD3TDErrorUpdateCallback(
+                        replay_wrapper=self.model.replay_buffer,
+                        update_freq=100,  # Update every 100 steps
+                        batch_size=min(256, self._batch_size),
+                        gamma=self._gamma,
+                        verbose=self.verbose,
+                    )
+                    cb_list.append(td_cb)
+
         # Add evaluation callback
         if eval_env is not None:
             eval_callback = EvalCallback(
@@ -481,6 +585,17 @@ class TD3Agent(BaseAgent):
                 verbose=self.verbose,
             )
             cb_list.append(eval_callback)
+
+            # Add metrics tracking callback for E6 checkpoint data
+            from .base_agent import MetricsTrackingCallback
+            metrics_callback = MetricsTrackingCallback(
+                eval_env=eval_env,
+                metrics=self.metrics,
+                eval_freq=eval_freq,
+                n_eval_episodes=n_eval_episodes,
+                verbose=self.verbose
+            )
+            cb_list.append(metrics_callback)
 
         # Add checkpoint callback
         if save_path is not None:
