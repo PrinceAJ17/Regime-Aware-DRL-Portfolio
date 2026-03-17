@@ -33,18 +33,22 @@ from src.utils.metrics import calculate_all_metrics
 
 
 TICKERS = ["SPY", "QQQ", "TLT", "GLD", "BIL"]
-TEST_START = "2022-01-01"
-TEST_END = "2023-12-31"
+# Test period dates - matches agent evaluation period
+# After the warmup buffer fix, agents now download test data from 2021-08-01
+# but start evaluation at 2022-01-01 (via start_idx), so baselines should match.
+TEST_START = "2022-01-03"  # First trading day of 2022 - matches agent test period!
+TEST_END = "2023-12-29"    # Last trading day of 2023
 INITIAL_CAPITAL = 1_000_000
 TRANSACTION_COST = 0.001  # 10 bps
 
 
 def load_test_data():
-    """Load test period price data."""
+    """Load test period price data (same dates as agent evaluation)."""
     print(f"Loading test data: {TEST_START} to {TEST_END}")
+    print("NOTE: Dates match agent evaluation period (2022-01-01 to 2023-12-31)")
     price_data = download_ohlcv_data(
         TICKERS, TEST_START, TEST_END,
-        cache_dir="data/raw/testing",
+        cache_dir="data/raw/baselines",  # Separate cache for baselines
         cache_expiry_days=365,
         quiet=True
     )
@@ -235,7 +239,7 @@ def main():
 
     # Summary table
     print("\n" + "=" * 70)
-    print("BASELINE COMPARISON (Test Period: 2022-2023)")
+    print(f"BASELINE COMPARISON (Test Period: {TEST_START} to {TEST_END})")
     print("=" * 70)
     print(f"{'Strategy':<30} {'Sharpe':>10} {'Return':>12} {'MDD':>10} {'Sortino':>10}")
     print("-" * 70)
