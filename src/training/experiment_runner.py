@@ -319,14 +319,19 @@ def execute_single_run(run_config_dict: dict) -> dict:
         #    - test_price_data  : 2022-2023  (held-out, primary reported metric)
         # Cache is keyed by ticker filename only, so each split must use its own
         # subdirectory to prevent the val/test requests hitting the training cache.
+        # Download with warmup buffer so features can be computed for the full eval period
+        # - Train: 2010-2019 (no extra buffer needed, agent uses random_start)
+        # - Val: Download from 2019-08-01 so 2020-01-01 has 5 months of warmup
+        # - Test: Download from 2021-08-01 so 2022-01-01 has 5 months of warmup
+        # This ensures features at eval start have full rolling window history.
         train_price_data = download_ohlcv_data(
             TICKERS, "2010-01-01", "2019-12-31", cache_dir="data/raw/training", cache_expiry_days=365, quiet=True
         )
         val_price_data = download_ohlcv_data(
-            TICKERS, "2020-01-01", "2021-12-31", cache_dir="data/raw/validation", cache_expiry_days=365, quiet=True
+            TICKERS, "2019-08-01", "2021-12-31", cache_dir="data/raw/validation", cache_expiry_days=365, quiet=True
         )
         test_price_data = download_ohlcv_data(
-            TICKERS, "2022-01-01", "2023-12-31", cache_dir="data/raw/testing", cache_expiry_days=365, quiet=True
+            TICKERS, "2021-08-01", "2023-12-31", cache_dir="data/raw/testing", cache_expiry_days=365, quiet=True
         )
 
         # 2. Calculate features for each split (cached to disk)
@@ -347,23 +352,40 @@ def execute_single_run(run_config_dict: dict) -> dict:
             episode_length=252,
             random_start=True,
         )
-        # Use full period length for val/test to ensure all regimes are covered
-        val_episode_length = len(val_price_data[list(val_price_data.keys())[0]]) - 1
-        test_episode_length = len(test_price_data[list(test_price_data.keys())[0]]) - 1
+
+        # Find correct start indices for val/test evaluation periods
+        # Val downloaded 2019-08-01 to 2021-12-31, but we want to START eval at 2020-01-01
+        # Test downloaded 2021-08-01 to 2023-12-31, but we want to START eval at 2022-01-01
+        val_feature_df = val_features[list(val_features.keys())[0]].dropna()
+        test_feature_df = test_features[list(test_features.keys())[0]].dropna()
+
+        val_dates = val_feature_df.index
+        test_dates = test_feature_df.index
+
+        # Find index where evaluation should actually start
+        val_eval_start = pd.Timestamp("2020-01-01")
+        test_eval_start = pd.Timestamp("2022-01-01")
+
+        val_start_idx = int(np.searchsorted(val_dates, val_eval_start))
+        test_start_idx = int(np.searchsorted(test_dates, test_eval_start))
+
+        # Episode length = from start date to end of data, minus buffer
+        val_episode_length = len(val_feature_df) - val_start_idx - 2
+        test_episode_length = len(test_feature_df) - test_start_idx - 2
 
         val_env = TradingEnvironment(
             price_data=val_price_data,
             feature_data=val_features,
             episode_length=val_episode_length,
             random_start=False,
-            start_idx=0,
+            start_idx=val_start_idx,
         )
         test_env = TradingEnvironment(
             price_data=test_price_data,
             feature_data=test_features,
             episode_length=test_episode_length,
             random_start=False,
-            start_idx=0,
+            start_idx=test_start_idx,
         )
 
         # 4. Regime detector — fit ONLY on training data to prevent look-ahead bias.
@@ -398,29 +420,33 @@ def execute_single_run(run_config_dict: dict) -> dict:
         training_config = create_training_config(run_config)
         metrics = agent.train(training_config=training_config)
 
+        # Use consistent n_episodes for ALL evaluation calls
+        # (previously mismatch: evaluate used 10, _collect_episode_data used 5)
+        N_EVAL_EPISODES = 5
+
         # 8. Evaluate on VALIDATION set (2020-2021) — generalisation check
-        val_results = agent.evaluate(val_env, n_episodes=10)
+        val_results = agent.evaluate(val_env, n_episodes=N_EVAL_EPISODES)
         val_financial, val_episode_data = _collect_episode_data(
-            agent, val_env, regime_detector=detector, price_data=val_price_data, n_episodes=5
+            agent, val_env, regime_detector=detector, price_data=val_price_data, n_episodes=N_EVAL_EPISODES
         )
         val_results.update(val_financial)
 
         val_regime_results = {}
         try:
-            val_regime_results = agent.evaluate_by_regime(val_env, n_episodes=10)
+            val_regime_results = agent.evaluate_by_regime(val_env, n_episodes=N_EVAL_EPISODES)
         except Exception:
             pass
 
         # 9. Evaluate on TEST set (2022-2023) — PRIMARY out-of-sample metric
-        test_results = agent.evaluate(test_env, n_episodes=10)
+        test_results = agent.evaluate(test_env, n_episodes=N_EVAL_EPISODES)
         test_financial, test_episode_data = _collect_episode_data(
-            agent, test_env, regime_detector=detector, price_data=test_price_data, n_episodes=5
+            agent, test_env, regime_detector=detector, price_data=test_price_data, n_episodes=N_EVAL_EPISODES
         )
         test_results.update(test_financial)
 
         test_regime_results = {}
         try:
-            test_regime_results = agent.evaluate_by_regime(test_env, n_episodes=10)
+            test_regime_results = agent.evaluate_by_regime(test_env, n_episodes=N_EVAL_EPISODES)
         except Exception:
             pass
 
@@ -587,21 +613,26 @@ def _collect_episode_data(agent, eval_env, regime_detector=None, price_data=None
         if episode_regimes:
             episode_data["regime_labels"].append(episode_regimes)
 
-    # Compute aggregate metrics
-    flat_returns = np.concatenate(all_episode_returns)
+    # Compute metrics per episode, then average
+    # This avoids the bug of compounding returns across repeated episodes
     metrics = {}
-    if len(flat_returns) >= 2:
-        raw_metrics = calculate_all_metrics(flat_returns)
-        for k, v in raw_metrics.items():
-            if isinstance(v, (np.floating, np.integer)):
-                fv = float(v)
-                if np.isfinite(fv):
-                    metrics[k] = fv
-            elif isinstance(v, float):
-                if np.isfinite(v):
-                    metrics[k] = v
-            elif isinstance(v, int):
-                metrics[k] = v
+    if all_episode_returns:
+        per_episode_metrics = []
+        for ep_returns in all_episode_returns:
+            if len(ep_returns) >= 2:
+                ep_metrics = calculate_all_metrics(np.array(ep_returns))
+                per_episode_metrics.append(ep_metrics)
+
+        if per_episode_metrics:
+            # Average metrics across episodes
+            all_keys = per_episode_metrics[0].keys()
+            for k in all_keys:
+                values = [m[k] for m in per_episode_metrics if k in m and np.isfinite(m[k])]
+                if values:
+                    if k == 'n_periods':
+                        metrics[k] = int(np.mean(values))
+                    else:
+                        metrics[k] = float(np.mean(values))
 
     return metrics, episode_data
 
