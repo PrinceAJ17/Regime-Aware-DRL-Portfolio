@@ -214,12 +214,14 @@ class RegimeAwareReplayBuffer:
             regime: 0 for regime in MarketRegime
         }
         
-        # For adaptive sampling: track TD errors per regime
+        # For adaptive sampling: track TD errors per regime using EMA
+        # EMA allows recent TD errors to have more influence than old ones
+        self._td_ema_decay = 0.99  # Keep 99% of old values each update
         self._td_errors_sum: Dict[MarketRegime, float] = {
             regime: 1.0 for regime in MarketRegime  # Initialize to 1 to avoid div by zero
         }
-        self._td_errors_count: Dict[MarketRegime, int] = {
-            regime: 1 for regime in MarketRegime
+        self._td_errors_count: Dict[MarketRegime, float] = {
+            regime: 1.0 for regime in MarketRegime  # Float for EMA
         }
     
     def add(
@@ -366,7 +368,10 @@ class RegimeAwareReplayBuffer:
             remaining -= n_samples
         
         # Distribute remaining samples to regimes that have extras
-        for regime in MarketRegime:
+        # Shuffle to avoid bias toward BULL (which would always be first)
+        shuffled_regimes = list(MarketRegime)
+        random.shuffle(shuffled_regimes)
+        for regime in shuffled_regimes:
             if remaining <= 0:
                 break
             extra = min(remaining, available[regime] - samples_per_regime[regime])
@@ -496,8 +501,10 @@ class RegimeAwareReplayBuffer:
             samples_per_regime[regime] = n_samples
             remaining -= n_samples
         
-        # Distribute any remaining
-        for regime in MarketRegime:
+        # Distribute any remaining (shuffle to avoid BULL bias)
+        shuffled_regimes = list(MarketRegime)
+        random.shuffle(shuffled_regimes)
+        for regime in shuffled_regimes:
             if remaining <= 0:
                 break
             extra = min(remaining, counts[regime] - samples_per_regime[regime])
@@ -546,7 +553,11 @@ class RegimeAwareReplayBuffer:
             for r in MarketRegime
         }
         total_td = sum(mean_td_errors.values())
-        
+
+        # Fallback to balanced sampling if no TD errors recorded
+        if total_td <= 0:
+            return self._sample_balanced(batch_size)
+
         # Normalize to proportions
         proportions = {r: td / total_td for r, td in mean_td_errors.items()}
         
@@ -585,16 +596,19 @@ class RegimeAwareReplayBuffer:
         return self._experiences_to_batch(experiences)
     
     def update_td_errors(
-        self, 
-        regime: MarketRegime, 
+        self,
+        regime: MarketRegime,
         td_errors: np.ndarray
     ) -> None:
         """
-        Update TD error statistics for a regime.
-        
+        Update TD error statistics for a regime using exponential moving average.
+
         Call this after computing TD errors during training
         to update the adaptive sampling weights.
-        
+
+        Using EMA ensures recent TD errors have more influence than old ones,
+        making adaptive sampling responsive to current learning state.
+
         Parameters:
         -----------
         regime : MarketRegime
@@ -602,8 +616,10 @@ class RegimeAwareReplayBuffer:
         td_errors : np.ndarray
             Array of TD error values
         """
-        self._td_errors_sum[regime] += np.sum(np.abs(td_errors))
-        self._td_errors_count[regime] += len(td_errors)
+        # Apply EMA decay to old values, then add new TD errors
+        decay = self._td_ema_decay
+        self._td_errors_sum[regime] = decay * self._td_errors_sum[regime] + np.sum(np.abs(td_errors))
+        self._td_errors_count[regime] = decay * self._td_errors_count[regime] + len(td_errors)
     
     def _experiences_to_batch(
         self, 
@@ -641,7 +657,7 @@ class RegimeAwareReplayBuffer:
         self._total_sampled = 0
         self._samples_per_regime = {regime: 0 for regime in MarketRegime}
         self._td_errors_sum = {regime: 1.0 for regime in MarketRegime}
-        self._td_errors_count = {regime: 1 for regime in MarketRegime}
+        self._td_errors_count = {regime: 1.0 for regime in MarketRegime}
 
     def is_full(self) -> bool:
         """Check if buffer is full (for SB3 compatibility)."""
@@ -765,8 +781,8 @@ class RegimeAwarePrioritizedBuffer:
         if random_seed is not None:
             np.random.seed(random_seed)
 
-        # Per-regime storage: list of (experience_tuple, global_index)
-        self._regime_data: Dict[MarketRegime, List] = {r: [] for r in MarketRegime}
+        # Per-regime storage: set of global indices for O(1) add/remove
+        self._regime_data: Dict[MarketRegime, set] = {r: set() for r in MarketRegime}
         # Global flat storage for index-based access
         self._all_data: List = [None] * capacity
         self._priorities = np.zeros(capacity, dtype=np.float64)
@@ -774,9 +790,10 @@ class RegimeAwarePrioritizedBuffer:
         self._pos = 0
         self._size = 0
 
-        # Regime-level TD error tracking for adaptive strategy
+        # Regime-level TD error tracking for adaptive strategy (using EMA)
+        self._td_ema_decay = 0.99  # Keep 99% of old values each update
         self._td_errors_sum: Dict[MarketRegime, float] = {r: 1.0 for r in MarketRegime}
-        self._td_errors_count: Dict[MarketRegime, int] = {r: 1 for r in MarketRegime}
+        self._td_errors_count: Dict[MarketRegime, float] = {r: 1.0 for r in MarketRegime}
 
     @property
     def beta(self) -> float:
@@ -805,12 +822,10 @@ class RegimeAwarePrioritizedBuffer:
 
         idx = self._pos
 
-        # Remove old entry from regime list if overwriting
+        # Remove old entry from regime set if overwriting (O(1) operation)
         if self._all_data[idx] is not None and self._regimes[idx] is not None:
             old_regime = self._regimes[idx]
-            regime_list = self._regime_data[old_regime]
-            # Remove index from regime list (swap-remove for O(1))
-            self._regime_data[old_regime] = [i for i in regime_list if i != idx]
+            self._regime_data[old_regime].discard(idx)
 
         # Store
         self._all_data[idx] = experience
@@ -831,13 +846,13 @@ class RegimeAwarePrioritizedBuffer:
             parsed_regime = MarketRegime.SIDEWAYS
 
         self._regimes[idx] = parsed_regime
-        self._regime_data[parsed_regime].append(idx)
+        self._regime_data[parsed_regime].add(idx)
 
         self._pos = (self._pos + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
 
     def _get_regime_counts(self) -> Dict[MarketRegime, int]:
-        return {r: len(indices) for r, indices in self._regime_data.items()}
+        return {r: len(idx_set) for r, idx_set in self._regime_data.items()}
 
     def _compute_samples_per_regime(self, batch_size: int) -> Dict[MarketRegime, int]:
         """Compute how many samples to draw from each regime based on strategy."""
@@ -863,9 +878,11 @@ class RegimeAwarePrioritizedBuffer:
             base = batch_size // len(MarketRegime)
             result = {r: min(base, counts[r]) for r in MarketRegime}
 
-        # Distribute remainder
+        # Distribute remainder (shuffle to avoid BULL bias)
         remaining = batch_size - sum(result.values())
-        for r in MarketRegime:
+        shuffled_regimes = list(MarketRegime)
+        random.shuffle(shuffled_regimes)
+        for r in shuffled_regimes:
             if remaining <= 0:
                 break
             extra = min(remaining, counts[r] - result[r])
@@ -888,10 +905,12 @@ class RegimeAwarePrioritizedBuffer:
         for regime, n in samples_per_regime.items():
             if n <= 0:
                 continue
-            regime_indices = self._regime_data[regime]
-            if len(regime_indices) == 0:
+            regime_idx_set = self._regime_data[regime]
+            if len(regime_idx_set) == 0:
                 continue
 
+            # Convert set to array for sampling
+            regime_indices = list(regime_idx_set)
             # Get priorities for this regime's experiences
             r_indices = np.array(regime_indices, dtype=np.int64)
             r_priorities = self._priorities[r_indices]
@@ -934,6 +953,12 @@ class RegimeAwarePrioritizedBuffer:
 
     def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray):
         """Update priorities based on TD errors."""
+        # Apply EMA decay once per batch for regime-level tracking
+        decay = self._td_ema_decay
+        for regime in MarketRegime:
+            self._td_errors_sum[regime] *= decay
+            self._td_errors_count[regime] *= decay
+
         for idx, td_error in zip(indices, td_errors):
             priority = (abs(td_error) + 1e-6) ** self.alpha
             self._priorities[int(idx)] = priority
