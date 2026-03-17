@@ -533,8 +533,8 @@ class TradingEnvironment(gym.Env):
         float
             Reward value (positive = good, negative = bad).
         """
-        # Portfolio return
-        portfolio_return = (curr_value - prev_value) / prev_value
+        # Portfolio return (guard against division by zero)
+        portfolio_return = (curr_value - prev_value) / max(prev_value, 1e-8)
         
         # Transaction cost penalty
         # Normalise by portfolio value to make it scale-invariant
@@ -544,8 +544,8 @@ class TradingEnvironment(gym.Env):
         # Update peak value
         self.peak_value = max(self.peak_value, curr_value)
         
-        # Calculate current drawdown
-        drawdown = (self.peak_value - curr_value) / self.peak_value
+        # Calculate current drawdown (guard against division by zero)
+        drawdown = (self.peak_value - curr_value) / max(self.peak_value, 1e-8)
         
         # Penalty only if drawdown exceeds threshold
         excess_drawdown = max(0, drawdown - self.drawdown_threshold)
@@ -723,9 +723,10 @@ class TradingEnvironment(gym.Env):
         # Calculate reward
         reward = self._calculate_reward(prev_value, self.portfolio_value, transaction_cost)
 
-        # Net-of-cost step return for financial metrics (transaction costs deducted from return,
-        # even though portfolio_value itself is tracked gross — costs are a cash outflow).
-        step_return = (self.portfolio_value - transaction_cost - prev_value) / prev_value
+        # Net-of-cost step return for financial metrics.
+        # Note: transaction_cost is already deducted from self.portfolio_value in _execute_trades()
+        # Guard against division by zero
+        step_return = (self.portfolio_value - prev_value) / max(prev_value, 1e-8)
         self.episode_returns.append(step_return)
         
         # Check termination conditions
