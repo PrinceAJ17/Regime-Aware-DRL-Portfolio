@@ -192,67 +192,92 @@ class HMMRegimeDetector:
         self._is_fitted: bool = False
     
     def _prepare_features(
-        self, 
-        price_data: pd.DataFrame,
+        self,
+        price_data: Union[pd.DataFrame, Dict[str, pd.DataFrame]],
         fit_normalisation: bool = False
     ) -> np.ndarray:
         """
         Prepare feature matrix for HMM from price data.
-        
+
         WHAT FEATURES DO WE USE?
         ------------------------
-        
+
         1. RETURNS (daily percentage change)
            - Most direct measure of price movement
            - Bull: positive on average
            - Bear: negative on average
-           
+
         2. VOLATILITY (rolling std of returns)
            - Measures uncertainty/fear
            - Bear markets have higher volatility
            - Bull markets are calmer
-           
+
         3. VOLUME CHANGE (percentage change in volume)
            - High volume = important moves
            - Can signal regime transitions
-        
+
         WHY NORMALISE?
         --------------
         HMMs work best when features are on similar scales.
         We use z-score normalisation: (x - mean) / std
-        
+
         Parameters:
         -----------
-        price_data : pd.DataFrame
-            Must have 'close' and 'volume' columns
-            
+        price_data : pd.DataFrame or Dict[str, pd.DataFrame]
+            Must have 'close' and 'volume' columns.
+            If dict, uses SPY or the first ticker.
+
         fit_normalisation : bool
             If True, compute and store normalisation parameters
             If False, use previously stored parameters
             (True during training, False during inference)
-            
+
         Returns:
         --------
         np.ndarray
             Feature matrix of shape (n_days, n_features)
         """
+        # Handle dict input (e.g., from download_ohlcv_data)
+        if isinstance(price_data, dict):
+            if 'SPY' in price_data:
+                price_data = price_data['SPY']
+            else:
+                price_data = list(price_data.values())[0]
+
+        # Find price column (handle different naming conventions)
+        price_col = None
+        for col in ['close', 'Close', 'Adj Close', 'adj_close']:
+            if col in price_data.columns:
+                price_col = col
+                break
+        if price_col is None:
+            # Fallback to first column
+            price_col = price_data.columns[0]
+
+        # Find volume column
+        volume_col = None
+        for col in ['volume', 'Volume']:
+            if col in price_data.columns:
+                volume_col = col
+                break
+
         features = {}
-        
+
         # Feature 1: Daily returns
         if 'returns' not in price_data.columns:
-            features['returns'] = price_data['close'].pct_change()
+            features['returns'] = price_data[price_col].pct_change()
         else:
             features['returns'] = price_data['returns']
-        
+
         # Feature 2: Rolling volatility (20-day)
         if 'volatility' not in price_data.columns:
             features['volatility'] = features['returns'].rolling(20).std()
         else:
             features['volatility'] = price_data['volatility']
-        
+
         # Feature 3: Volume change
-        if 'volume' in price_data.columns:
-            features['volume_change'] = price_data['volume'].pct_change()
+        if volume_col is not None:
+            features['volume_change'] = price_data[volume_col].pct_change()
         else:
             # If no volume, use zero (neutral)
             features['volume_change'] = pd.Series(0, index=price_data.index)
@@ -284,8 +309,8 @@ class HMMRegimeDetector:
         return X, feature_df.index
     
     def fit(
-        self, 
-        price_data: pd.DataFrame,
+        self,
+        price_data: Union[pd.DataFrame, Dict[str, pd.DataFrame]],
         verbose: bool = True
     ) -> 'HMMRegimeDetector':
         """
@@ -331,9 +356,10 @@ class HMMRegimeDetector:
         
         Parameters:
         -----------
-        price_data : pd.DataFrame
+        price_data : pd.DataFrame or Dict[str, pd.DataFrame]
             Training data. ONLY use training period!
-            
+            If dict, uses SPY or the first ticker.
+
         verbose : bool
             Whether to print training progress
             
@@ -396,7 +422,7 @@ class HMMRegimeDetector:
         if verbose:
             print("   State mapping:")
             for state_idx, regime in self._state_mapping.items():
-                print(f"     State {state_idx} → {regime.value}")
+                print(f"     State {state_idx} -> {regime.value}")
         
         self._is_fitted = True
         
@@ -439,7 +465,22 @@ class HMMRegimeDetector:
         # argsort returns indices that would sort the array
         sorted_indices = np.argsort(mean_returns)
         
-        # Assign labels
+        # Handle edge cases first
+        if self.config.n_regimes == 1:
+            # Single regime: default to sideways (neutral)
+            self._state_mapping = {sorted_indices[0]: MarketRegime.SIDEWAYS}
+            return
+
+        if self.config.n_regimes == 2:
+            # Two regimes: bull and bear only
+            self._state_mapping = {
+                sorted_indices[0]: MarketRegime.BEAR,   # Lowest returns
+                sorted_indices[1]: MarketRegime.BULL,   # Highest returns
+            }
+            return
+
+        # Standard case: n_regimes >= 3
+        # Assign labels based on mean returns
         # Lowest return → Bear
         # Highest return → Bull
         # Middle → Sideways
@@ -447,35 +488,28 @@ class HMMRegimeDetector:
             sorted_indices[0]: MarketRegime.BEAR,      # Lowest returns
             sorted_indices[-1]: MarketRegime.BULL,     # Highest returns
         }
-        
+
         # Handle sideways (all middle states)
         for i in range(1, len(sorted_indices) - 1):
             self._state_mapping[sorted_indices[i]] = MarketRegime.SIDEWAYS
-        
-        # Edge case: if n_regimes=2, we only have bull and bear
-        if self.config.n_regimes == 2:
-            self._state_mapping = {
-                sorted_indices[0]: MarketRegime.BEAR,
-                sorted_indices[1]: MarketRegime.BULL,
-            }
     
     def predict(
-        self, 
-        price_data: pd.DataFrame
+        self,
+        price_data: Union[pd.DataFrame, Dict[str, pd.DataFrame]]
     ) -> pd.Series:
         """
         Predict regimes for price data using trained model.
-        
+
         Can be used on:
         - Training data (to label training experiences)
         - Validation data (to tune hyperparameters)
         - Test data (final evaluation)
         - Live data (real-time regime detection)
-        
+
         Parameters:
         -----------
-        price_data : pd.DataFrame
-            Price data to predict regimes for
+        price_data : pd.DataFrame or Dict[str, pd.DataFrame]
+            Price data to predict regimes for. If dict, uses SPY or first ticker.
             
         Returns:
         --------
@@ -484,7 +518,14 @@ class HMMRegimeDetector:
         """
         if not self._is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-        
+
+        # Handle dict input (e.g., from download_ohlcv_data)
+        if isinstance(price_data, dict):
+            if 'SPY' in price_data:
+                price_data = price_data['SPY']
+            else:
+                price_data = list(price_data.values())[0]
+
         # Prepare features (don't refit normalisation)
         X, indices = self._prepare_features(price_data, fit_normalisation=False)
         
@@ -504,36 +545,47 @@ class HMMRegimeDetector:
         
         # Fill any remaining NaN at the start with the first valid value
         regime_series = regime_series.bfill()
-        
+
         return regime_series
-    
+
+    def detect(
+        self,
+        price_data: Union[pd.DataFrame, Dict[str, pd.DataFrame]]
+    ) -> pd.Series:
+        """
+        Alias for predict() to match RuleBasedRegimeDetector API.
+
+        This allows UnifiedRegimeDetector to call detect() on both detectors.
+        """
+        return self.predict(price_data)
+
     def predict_proba(
-        self, 
-        price_data: pd.DataFrame
+        self,
+        price_data: Union[pd.DataFrame, Dict[str, pd.DataFrame]]
     ) -> pd.DataFrame:
         """
         Get probability distribution over regimes.
-        
+
         Unlike predict() which returns the MOST LIKELY regime,
         this returns PROBABILITIES for each regime.
-        
+
         Useful for:
         - Uncertainty quantification
         - Soft transitions between regimes
         - Risk management (high uncertainty = be cautious)
-        
+
         Example output:
-        
+
                       bull_prob  bear_prob  sideways_prob
         2020-01-01     0.85       0.05        0.10
         2020-01-02     0.82       0.08        0.10
         ...
-        
+
         Parameters:
         -----------
-        price_data : pd.DataFrame
-            Price data
-            
+        price_data : pd.DataFrame or Dict[str, pd.DataFrame]
+            Price data. If dict, uses SPY or first ticker.
+
         Returns:
         --------
         pd.DataFrame
@@ -541,7 +593,14 @@ class HMMRegimeDetector:
         """
         if not self._is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-        
+
+        # Handle dict input (e.g., from download_ohlcv_data)
+        if isinstance(price_data, dict):
+            if 'SPY' in price_data:
+                price_data = price_data['SPY']
+            else:
+                price_data = list(price_data.values())[0]
+
         # Prepare features
         X, indices = self._prepare_features(price_data, fit_normalisation=False)
         
