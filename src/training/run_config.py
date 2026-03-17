@@ -39,6 +39,8 @@ class RunConfig:
             parts.append(self.feature_set)
         if self.experiment == "regime_detection":
             parts.append(self.detection_method)
+        if self.experiment == "timestep_ablation":
+            parts.append(f"{self.total_timesteps // 1000}k")
         parts.append(f"seed{self.seed}")
         return "__".join(parts)
 
@@ -174,6 +176,28 @@ def generate_e6_runs() -> List[RunConfig]:
     return runs
 
 
+def generate_e7_runs() -> List[RunConfig]:
+    """E7: Timestep Ablation — 30 runs.
+
+    Tests impact of training duration on overfitting.
+    Only TD3 (best performer) with adaptive and standard strategies.
+    """
+    runs = []
+    timestep_options = [100_000, 200_000, 300_000, 400_000, 500_000]
+
+    for timesteps in timestep_options:
+        for strategy in ["adaptive", "standard"]:
+            for seed in [42, 123, 456]:
+                runs.append(RunConfig(
+                    experiment="timestep_ablation",
+                    algorithm="td3",
+                    strategy=strategy,
+                    seed=seed,
+                    total_timesteps=timesteps,
+                ))
+    return runs
+
+
 EXPERIMENT_GENERATORS = {
     "replay_comparison": generate_e1_runs,
     "regime_performance": generate_e2_runs,
@@ -181,6 +205,7 @@ EXPERIMENT_GENERATORS = {
     "feature_ablation": generate_e4_runs,
     "regime_detection": generate_e5_runs,
     "sample_efficiency": generate_e6_runs,
+    "timestep_ablation": generate_e7_runs,
 }
 
 

@@ -30,6 +30,7 @@ VALID_EXPERIMENTS = [
     "feature_ablation",
     "regime_detection",
     "sample_efficiency",
+    "timestep_ablation",
 ]
 
 

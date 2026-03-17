@@ -20,6 +20,7 @@ EXPERIMENT_NUMBERS = {
     "feature_ablation": "E4",
     "regime_detection": "E5",
     "sample_efficiency": "E6",
+    "timestep_ablation": "E7",
 }
 
 
@@ -256,11 +257,16 @@ def main():
         if pid_file.exists():
             pid = int(pid_file.read_text().strip())
             if _is_pid_alive(pid):
-                import ctypes
-                handle = ctypes.windll.kernel32.OpenProcess(1, False, pid)
-                ctypes.windll.kernel32.TerminateProcess(handle, 1)
-                ctypes.windll.kernel32.CloseHandle(handle)
-                print(f"Terminated PID {pid}")
+                # Use taskkill /T to kill the entire process tree (parent + workers)
+                result = subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(pid)],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    print(f"Terminated process tree (PID {pid})")
+                else:
+                    print(f"Failed to terminate: {result.stderr.strip()}")
             else:
                 print(f"Process {pid} already stopped")
             pid_file.unlink()
@@ -282,7 +288,14 @@ def main():
         else:
             pid_file.unlink()
 
-    python_exe = sys.executable
+    # Use the project's venv Python, not whatever Python is running this script
+    project_root = pathlib.Path(__file__).parent.parent
+    venv_python = project_root / "DRL" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        python_exe = str(venv_python)
+    else:
+        python_exe = sys.executable  # Fallback to current Python
+
     cmd = [
         python_exe, "-u", "scripts/run_experiments.py",
         "--experiments", *args.experiments,
