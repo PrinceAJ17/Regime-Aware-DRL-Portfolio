@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import numpy as np
+import pandas as pd
 import gymnasium as gym
 
 
@@ -599,6 +600,121 @@ class BaseAgent(ABC):
             print(f"[{self.name}] {message}")
 
 
+# Import BaseCallback here to avoid circular imports
+try:
+    from stable_baselines3.common.callbacks import BaseCallback
+    SB3_AVAILABLE = True
+except ImportError:
+    SB3_AVAILABLE = False
+    BaseCallback = object  # Fallback for type hints
+
+
+class MetricsTrackingCallback(BaseCallback if SB3_AVAILABLE else object):
+    """
+    Callback to track training metrics at regular intervals.
+
+    This callback evaluates the agent periodically during training and
+    stores results in the TrainingMetrics object. This is essential for
+    E6 (sample efficiency) analysis where we need metrics at multiple
+    checkpoints during training.
+
+    Usage:
+    ------
+    >>> metrics_cb = MetricsTrackingCallback(
+    ...     eval_env=eval_env,
+    ...     metrics=agent.metrics,
+    ...     eval_freq=10000,
+    ...     n_eval_episodes=5
+    ... )
+    >>> model.learn(total_timesteps=100000, callback=metrics_cb)
+    """
+
+    def __init__(
+        self,
+        eval_env: gym.Env,
+        metrics: 'TrainingMetrics',
+        eval_freq: int = 10000,
+        n_eval_episodes: int = 5,
+        verbose: int = 0
+    ):
+        """
+        Initialize the callback.
+
+        Parameters:
+        -----------
+        eval_env : gym.Env
+            Environment for evaluation
+        metrics : TrainingMetrics
+            Metrics object to store results in
+        eval_freq : int
+            Evaluate every N timesteps
+        n_eval_episodes : int
+            Number of episodes per evaluation
+        verbose : int
+            Verbosity level
+        """
+        if SB3_AVAILABLE:
+            super().__init__(verbose)
+        self.eval_env = eval_env
+        self.metrics = metrics
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        self._last_eval_step = 0
+
+    def _on_step(self) -> bool:
+        """Called at each step during training."""
+        # Check if it's time to evaluate
+        if self.num_timesteps - self._last_eval_step >= self.eval_freq:
+            self._last_eval_step = self.num_timesteps
+            self._evaluate_and_record()
+        return True
+
+    def _evaluate_and_record(self):
+        """Run evaluation and record metrics."""
+        episode_rewards = []
+        episode_lengths = []
+
+        for _ in range(self.n_eval_episodes):
+            obs, _ = self.eval_env.reset()
+            done = False
+            truncated = False
+            episode_reward = 0.0
+            episode_length = 0
+
+            while not (done or truncated):
+                action, _ = self.model.predict(obs, deterministic=True)
+                obs, reward, done, truncated, info = self.eval_env.step(action)
+                episode_reward += reward
+                episode_length += 1
+
+            episode_rewards.append(episode_reward)
+            episode_lengths.append(episode_length)
+
+        mean_reward = np.mean(episode_rewards)
+
+        # Try to get financial metrics from the environment
+        sharpe = None
+        max_dd = None
+        if hasattr(self.eval_env, 'get_metrics'):
+            try:
+                env_metrics = self.eval_env.get_metrics()
+                sharpe = env_metrics.get('sharpe_ratio')
+                max_dd = env_metrics.get('max_drawdown')
+            except Exception:
+                pass
+
+        # Add to metrics
+        self.metrics.add_eval_result(
+            timestep=self.num_timesteps,
+            mean_reward=mean_reward,
+            sharpe=sharpe,
+            max_dd=max_dd
+        )
+
+        if self.verbose > 0:
+            print(f"[Metrics] Step {self.num_timesteps}: reward={mean_reward:.2f}")
+
+
 class ReplayBufferWrapper:
     """
     Wrapper to make RegimeAwareReplayBuffer compatible with Stable Baselines 3.
@@ -684,16 +800,26 @@ class ReplayBufferWrapper:
         # Track current regime for sampling
         self._current_regime = None
 
-        # Cache regime series for O(1) lookups
+        # Cache regime series for date-based lookups (not index-based!)
+        # Using index-based lookup is BUGGY because regime array may have
+        # different length than env dates due to NaN warmup drops.
         self._regime_cache = None
-        self._regime_values = None
+        self._env_dates = None
         if price_data is not None and regime_detector is not None:
             try:
                 self._regime_cache = regime_detector.detect(price_data)
-                self._regime_values = self._regime_cache.values
             except Exception:
                 self._regime_cache = None
-                self._regime_values = None
+
+        # Get environment dates for proper alignment
+        if env is not None:
+            inner_env = env
+            if hasattr(inner_env, 'envs'):
+                inner_env = inner_env.envs[0]
+            if hasattr(inner_env, 'unwrapped'):
+                inner_env = inner_env.unwrapped
+            if hasattr(inner_env, 'dates'):
+                self._env_dates = inner_env.dates
     
     def _get_env_step(self) -> Optional[int]:
         """Get the current step index from the environment."""
@@ -731,12 +857,19 @@ class ReplayBufferWrapper:
         if infos and len(infos) > 0 and isinstance(infos[0], dict) and 'regime' in infos[0]:
             regime_str = infos[0]['regime']
 
-        # Method 2: Use cached regime array + env step index
-        elif self._regime_values is not None:
+        # Method 2: Use cached regime series + env dates (date-based lookup)
+        # This avoids index misalignment issues when regime cache has different
+        # length due to NaN warmup drops in feature calculation
+        elif self._regime_cache is not None and self._env_dates is not None:
             current_step = self._get_env_step()
-            if current_step is not None and 0 <= current_step < len(self._regime_values):
-                regime_val = self._regime_values[current_step]
-                regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
+            if current_step is not None and 0 <= current_step < len(self._env_dates):
+                current_date = self._env_dates[current_step]
+                # Convert numpy datetime64 to pandas-compatible format if needed
+                if hasattr(current_date, 'astype'):
+                    current_date = pd.Timestamp(current_date)
+                if current_date in self._regime_cache.index:
+                    regime_val = self._regime_cache.loc[current_date]
+                    regime_str = regime_val.value if hasattr(regime_val, 'value') else str(regime_val)
 
         # Method 3: Use stored current regime from callback
         elif self._current_regime is not None:
@@ -778,6 +911,7 @@ class ReplayBufferWrapper:
         Sample a batch of experiences (SB3 format).
 
         Returns a ReplayBufferSamples named tuple that SB3 expects.
+        Also stores regime info for TD error updates.
         """
         import torch
         from stable_baselines3.common.buffers import ReplayBufferSamples
@@ -787,14 +921,17 @@ class ReplayBufferWrapper:
             batch_size=batch_size,
             current_regime=self._current_regime,
         )
-        
+
+        # Store regime indices for TD error update (for adaptive sampling)
+        self._last_batch_regimes = batch.get('regimes', None)
+
         # Convert to tensors
         observations = torch.as_tensor(batch['states'], device=self.device).float()
         actions = torch.as_tensor(batch['actions'], device=self.device).float()
         next_observations = torch.as_tensor(batch['next_states'], device=self.device).float()
         dones = torch.as_tensor(batch['dones'], device=self.device).float().unsqueeze(1)
         rewards = torch.as_tensor(batch['rewards'], device=self.device).float().unsqueeze(1)
-        
+
         return ReplayBufferSamples(
             observations=observations,
             actions=actions,
@@ -802,6 +939,41 @@ class ReplayBufferWrapper:
             dones=dones,
             rewards=rewards,
         )
+
+    def update_td_errors(self, td_errors) -> None:
+        """
+        Update TD error statistics for adaptive sampling.
+
+        Called after training step with TD errors for the last sampled batch.
+        Groups TD errors by regime and updates the underlying buffer.
+
+        Parameters:
+        -----------
+        td_errors : np.ndarray or torch.Tensor
+            TD errors for each sample in the last batch
+        """
+        import numpy as np
+        from src.replay.regime_aware_buffer import MarketRegime
+
+        if self._last_batch_regimes is None:
+            return
+
+        # Convert to numpy if tensor
+        if hasattr(td_errors, 'cpu'):
+            td_errors = td_errors.detach().cpu().numpy()
+        td_errors = np.asarray(td_errors).flatten()
+
+        regimes = self._last_batch_regimes
+        if len(td_errors) != len(regimes):
+            return
+
+        # Group TD errors by regime and update buffer
+        for regime in MarketRegime:
+            regime_idx = list(MarketRegime).index(regime)
+            mask = (regimes == regime_idx)
+            if mask.any():
+                regime_td_errors = td_errors[mask]
+                self.regime_buffer.update_td_errors(regime, regime_td_errors)
     
     def set_current_regime(self, regime) -> None:
         """Set the current market regime for sampling."""
