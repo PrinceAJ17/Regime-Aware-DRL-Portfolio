@@ -215,6 +215,94 @@ class RegimeTrackingCallback(BaseCallback):
                 print(f"  {regime}: {count} steps ({pct:.1f}%)")
 
 
+class TDErrorUpdateCallback(BaseCallback):
+    """
+    Callback to compute TD errors and update adaptive sampling weights.
+
+    For SAC: TD error = |Q(s,a) - (r + γ * (1-d) * V(s'))|
+
+    This callback periodically computes TD errors for samples in the buffer
+    and updates the regime-level TD error statistics used by adaptive sampling.
+    """
+
+    def __init__(
+        self,
+        replay_wrapper: ReplayBufferWrapper,
+        update_freq: int = 100,
+        batch_size: int = 256,
+        gamma: float = 0.99,
+        verbose: int = 0
+    ):
+        super().__init__(verbose)
+        self.replay_wrapper = replay_wrapper
+        self.update_freq = update_freq
+        self.batch_size = batch_size
+        self.gamma = gamma
+        self._n_calls = 0
+
+    def _on_step(self) -> bool:
+        """Compute and update TD errors periodically."""
+        self._n_calls += 1
+
+        # Only update every N steps
+        if self._n_calls % self.update_freq != 0:
+            return True
+
+        # Need enough samples
+        if len(self.replay_wrapper) < self.batch_size:
+            return True
+
+        try:
+            self._compute_and_update_td_errors()
+        except Exception as e:
+            if self.verbose > 0:
+                print(f"TD error update failed: {e}")
+
+        return True
+
+    def _compute_and_update_td_errors(self):
+        """Compute TD errors for a batch and update the buffer."""
+        import torch
+        import numpy as np
+
+        model = self.model  # SB3 model (SAC)
+        device = model.device
+
+        # Sample a batch (this also stores regime info in replay_wrapper)
+        batch = self.replay_wrapper.sample(self.batch_size)
+
+        with torch.no_grad():
+            # Get current Q-values
+            actions = batch.actions
+            observations = batch.observations
+            next_observations = batch.next_observations
+            rewards = batch.rewards
+            dones = batch.dones
+
+            # Compute Q(s, a) from both critics, take minimum
+            q1, q2 = model.critic(observations, actions)
+            q_values = torch.min(q1, q2)
+
+            # Compute V(s') using target value function
+            # For SAC: V(s') = E[Q(s', a') - α * log π(a'|s')]
+            next_actions, next_log_prob, _ = model.actor.action_log_prob(next_observations)
+            q1_next, q2_next = model.critic_target(next_observations, next_actions)
+            q_next = torch.min(q1_next, q2_next)
+
+            # Get entropy coefficient
+            ent_coef = model.ent_coef_tensor.item() if hasattr(model, 'ent_coef_tensor') else 0.2
+            v_next = q_next - ent_coef * next_log_prob
+
+            # Compute TD target: r + γ * (1-d) * V(s')
+            td_target = rewards + self.gamma * (1 - dones) * v_next
+
+            # TD error = |Q(s,a) - TD_target|
+            td_errors = torch.abs(q_values - td_target).squeeze()
+
+            # Update the buffer with these TD errors
+            self.replay_wrapper.update_td_errors(td_errors.cpu().numpy())
+
+
 class SACAgent(BaseAgent):
     """
     SAC Agent with regime-aware replay buffer integration.
@@ -417,7 +505,18 @@ class SACAgent(BaseAgent):
                 verbose=self.verbose
             )
             callback_list.append(regime_callback)
-        
+
+            # Add TD error update callback for adaptive sampling
+            if self.sac_config.replay_strategy == 'adaptive':
+                td_callback = TDErrorUpdateCallback(
+                    replay_wrapper=self.replay_wrapper,
+                    update_freq=100,  # Update every 100 steps
+                    batch_size=min(256, self.sac_config.batch_size),
+                    gamma=self.sac_config.gamma,
+                    verbose=self.verbose
+                )
+                callback_list.append(td_callback)
+
         # Add evaluation callback
         if eval_env is not None:
             eval_callback = EvalCallback(
@@ -430,7 +529,18 @@ class SACAgent(BaseAgent):
                 verbose=self.verbose
             )
             callback_list.append(eval_callback)
-        
+
+            # Add metrics tracking callback for E6 checkpoint data
+            from .base_agent import MetricsTrackingCallback
+            metrics_callback = MetricsTrackingCallback(
+                eval_env=eval_env,
+                metrics=self.metrics,
+                eval_freq=training_config.eval_freq,
+                n_eval_episodes=training_config.n_eval_episodes,
+                verbose=self.verbose
+            )
+            callback_list.append(metrics_callback)
+
         # Train!
         start_time = datetime.now()
         
