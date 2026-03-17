@@ -689,34 +689,37 @@ def normalise_zscore(
 ) -> pd.Series:
     """
     Normalise a series using rolling z-score.
-    
+
     What is Z-Score Normalisation?
     ------------------------------
     Z-score transforms data so it has mean=0 and standard deviation=1.
-    
+
     Formula: z = (x - mean) / std
-    
+
     We use a ROLLING window so that:
     - The normalisation adapts to changing market conditions
     - Values are relative to recent history, not all-time history
     - The agent sees comparable scales even if volatility changes
-    
+
     Why Rolling?
     ------------
     Markets change over time. Volatility in 2008 was much higher than 2017.
     If we normalised using all-time statistics, features from calm periods
     would look very different from features during crises.
-    
+
     Rolling z-score keeps everything relative to recent history, making
     the agent's job easier.
-    
+
+    Note: pandas rolling() defaults to center=False, meaning it only uses
+    PAST data (no look-ahead bias).
+
     Parameters
     ----------
     series : pd.Series
         Series to normalise.
     window : int
         Rolling window size (default 60 days ≈ 3 months).
-    
+
     Returns
     -------
     pd.Series
@@ -724,10 +727,10 @@ def normalise_zscore(
     """
     rolling_mean = series.rolling(window=window).mean()
     rolling_std = series.rolling(window=window).std()
-    
+
     # Avoid division by zero
     rolling_std = rolling_std.replace(0, np.nan)
-    
+
     return (series - rolling_mean) / rolling_std
 
 
@@ -738,16 +741,19 @@ def normalise_minmax(
 ) -> pd.Series:
     """
     Normalise a series using rolling min-max scaling.
-    
+
     What is Min-Max Normalisation?
     ------------------------------
     Min-max scaling transforms data to a fixed range, typically [0, 1].
-    
+
     Formula: x_scaled = (x - min) / (max - min)
-    
+
     Useful for features that have natural bounds (like RSI which is 0-100)
     or when you want values in a specific range.
-    
+
+    Note: pandas rolling() defaults to center=False, meaning it only uses
+    PAST data (no look-ahead bias).
+
     Parameters
     ----------
     series : pd.Series
@@ -756,7 +762,7 @@ def normalise_minmax(
         Rolling window size.
     feature_range : tuple
         Desired output range (default (0, 1)).
-    
+
     Returns
     -------
     pd.Series
@@ -764,14 +770,14 @@ def normalise_minmax(
     """
     rolling_min = series.rolling(window=window).min()
     rolling_max = series.rolling(window=window).max()
-    
+
     # Avoid division by zero
     range_diff = rolling_max - rolling_min
     range_diff = range_diff.replace(0, np.nan)
-    
+
     # Scale to [0, 1]
     scaled = (series - rolling_min) / range_diff
-    
+
     # Scale to desired range
     min_val, max_val = feature_range
     return scaled * (max_val - min_val) + min_val
@@ -863,7 +869,6 @@ def calculate_features_for_ticker(
     - atr_14: Average True Range
     - obv: On-Balance Volume
     - volatility_5d, volatility_10d, volatility_20d: Rolling volatility
-    - relative_strength_5d, relative_strength_10d, relative_strength_20d: Relative strength
     - spread_proxy: Bid-ask spread proxy
     """
     features = pd.DataFrame(index=df.index)
