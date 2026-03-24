@@ -40,8 +40,6 @@ def generate_all_plots(output_dir: Path = FIGURES_DIR):
     if any(e in df["experiment"].values for e in ["replay_comparison", "regime_performance"]):
         plot_e2_regime_heatmap(df, output_dir)
 
-    if "robustness" in df["experiment"].values:
-        plot_e3_robustness_curves(df, output_dir)
 
     if "sample_efficiency" in df["experiment"].values:
         plot_e6_sample_efficiency(output_dir)
@@ -108,6 +106,7 @@ def plot_e1_learning_curves(output_dir: Path):
         ax.set_xlabel("Timesteps")
         if i == 0:
             ax.set_ylabel("Eval Reward")
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x/1000)}k"))
         ax.legend(fontsize=7)
 
     fig.suptitle("E1: Learning Curves", fontsize=14, fontweight="bold")
