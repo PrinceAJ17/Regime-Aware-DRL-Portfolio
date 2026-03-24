@@ -143,7 +143,7 @@ def simulate_portfolio(returns_df: pd.DataFrame, weights: np.ndarray,
 
 def compute_risk_parity_weights(returns_df: pd.DataFrame, lookback: int = 60) -> np.ndarray:
     """Compute inverse-volatility weights based on recent returns."""
-    recent_returns = returns_df.iloc[-lookback:]
+    recent_returns = returns_df.iloc[:lookback]
     vols = recent_returns.std()
     inv_vols = 1 / vols
     weights = inv_vols / inv_vols.sum()
