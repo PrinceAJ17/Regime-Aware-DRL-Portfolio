@@ -96,6 +96,7 @@ def load_e5_results() -> pd.DataFrame:
                         "test_mdd": test_results.get("max_drawdown"),
                         "test_return": test_results.get("cumulative_return"),
                         "test_sortino": test_results.get("sortino_ratio"),
+                        "test_calmar": test_results.get("calmar_ratio"),
                     })
                 except Exception as e:
                     print(f"Warning: Failed to load {run_dir}: {e}")
@@ -429,7 +430,10 @@ def save_summary(df: pd.DataFrame):
     summary = df.groupby(['detection_method', 'strategy']).agg({
         'test_sharpe': ['mean', 'std', 'count'],
         'val_sharpe': ['mean'],
-        'test_mdd': ['mean']
+        'test_mdd': ['mean'],
+        'test_return': ['mean'],
+        'test_sortino': ['mean'],
+        'test_calmar': ['mean']
     }).round(3)
     summary.columns = ['_'.join(col) for col in summary.columns]
     summary = summary.reset_index()

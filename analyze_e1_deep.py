@@ -17,120 +17,71 @@ from scipy import stats
 from pathlib import Path
 import json
 
-# Raw data from launch_experiment.py --status output
-E1_RESULTS = [
-    # PPO
-    {"algorithm": "ppo", "strategy": "standard", "seed": 42, "test_sharpe": 0.372, "val_sharpe": 1.015, "test_mdd": 16.1},
-    {"algorithm": "ppo", "strategy": "standard", "seed": 123, "test_sharpe": 0.521, "val_sharpe": 1.494, "test_mdd": 16.2},
-    {"algorithm": "ppo", "strategy": "standard", "seed": 456, "test_sharpe": 0.363, "val_sharpe": 1.481, "test_mdd": 18.1},
-    {"algorithm": "ppo", "strategy": "standard", "seed": 789, "test_sharpe": 0.400, "val_sharpe": 1.183, "test_mdd": 14.1},
-    {"algorithm": "ppo", "strategy": "standard", "seed": 1000, "test_sharpe": -0.214, "val_sharpe": 1.389, "test_mdd": 23.3},
-    {"algorithm": "ppo", "strategy": "balanced", "seed": 42, "test_sharpe": 0.218, "val_sharpe": 1.739, "test_mdd": 22.5},
-    {"algorithm": "ppo", "strategy": "balanced", "seed": 123, "test_sharpe": -0.085, "val_sharpe": 1.145, "test_mdd": 24.3},
-    {"algorithm": "ppo", "strategy": "balanced", "seed": 456, "test_sharpe": 0.148, "val_sharpe": 1.620, "test_mdd": 21.3},
-    {"algorithm": "ppo", "strategy": "balanced", "seed": 789, "test_sharpe": 0.475, "val_sharpe": 2.017, "test_mdd": 17.3},
-    {"algorithm": "ppo", "strategy": "balanced", "seed": 1000, "test_sharpe": 0.084, "val_sharpe": 0.996, "test_mdd": 20.2},
-    {"algorithm": "ppo", "strategy": "current_focused", "seed": 42, "test_sharpe": -0.096, "val_sharpe": 1.739, "test_mdd": 27.1},
-    {"algorithm": "ppo", "strategy": "current_focused", "seed": 123, "test_sharpe": 0.233, "val_sharpe": 1.474, "test_mdd": 17.5},
-    {"algorithm": "ppo", "strategy": "current_focused", "seed": 456, "test_sharpe": 0.296, "val_sharpe": 1.104, "test_mdd": 14.0},
-    {"algorithm": "ppo", "strategy": "current_focused", "seed": 789, "test_sharpe": 0.524, "val_sharpe": 1.009, "test_mdd": 14.3},
-    {"algorithm": "ppo", "strategy": "current_focused", "seed": 1000, "test_sharpe": 0.667, "val_sharpe": 1.732, "test_mdd": 11.7},
-    {"algorithm": "ppo", "strategy": "inverse_frequency", "seed": 42, "test_sharpe": 0.145, "val_sharpe": 2.610, "test_mdd": 22.9},
-    {"algorithm": "ppo", "strategy": "inverse_frequency", "seed": 123, "test_sharpe": 0.364, "val_sharpe": 1.893, "test_mdd": 18.2},
-    {"algorithm": "ppo", "strategy": "inverse_frequency", "seed": 456, "test_sharpe": -0.100, "val_sharpe": 1.519, "test_mdd": 27.0},
-    {"algorithm": "ppo", "strategy": "inverse_frequency", "seed": 789, "test_sharpe": 0.136, "val_sharpe": 1.926, "test_mdd": 18.1},
-    {"algorithm": "ppo", "strategy": "inverse_frequency", "seed": 1000, "test_sharpe": 0.515, "val_sharpe": 1.430, "test_mdd": 17.8},
-    {"algorithm": "ppo", "strategy": "adaptive", "seed": 42, "test_sharpe": 0.392, "val_sharpe": 1.078, "test_mdd": 19.5},
-    {"algorithm": "ppo", "strategy": "adaptive", "seed": 123, "test_sharpe": -0.327, "val_sharpe": 1.355, "test_mdd": 26.5},
-    {"algorithm": "ppo", "strategy": "adaptive", "seed": 456, "test_sharpe": 0.105, "val_sharpe": 1.844, "test_mdd": 20.7},
-    {"algorithm": "ppo", "strategy": "adaptive", "seed": 789, "test_sharpe": 0.657, "val_sharpe": 1.494, "test_mdd": 14.5},
-    {"algorithm": "ppo", "strategy": "adaptive", "seed": 1000, "test_sharpe": 0.272, "val_sharpe": 0.893, "test_mdd": 17.3},
-    # SAC
-    {"algorithm": "sac", "strategy": "standard", "seed": 42, "test_sharpe": 0.383, "val_sharpe": 1.207, "test_mdd": 14.7},
-    {"algorithm": "sac", "strategy": "standard", "seed": 123, "test_sharpe": 0.690, "val_sharpe": 1.863, "test_mdd": 19.8},
-    {"algorithm": "sac", "strategy": "standard", "seed": 456, "test_sharpe": 0.330, "val_sharpe": 1.260, "test_mdd": 17.2},
-    {"algorithm": "sac", "strategy": "standard", "seed": 789, "test_sharpe": 0.377, "val_sharpe": 2.004, "test_mdd": 15.5},
-    {"algorithm": "sac", "strategy": "standard", "seed": 1000, "test_sharpe": 0.511, "val_sharpe": 2.175, "test_mdd": 18.3},
-    {"algorithm": "sac", "strategy": "balanced", "seed": 42, "test_sharpe": 0.064, "val_sharpe": 1.645, "test_mdd": 19.7},
-    {"algorithm": "sac", "strategy": "balanced", "seed": 123, "test_sharpe": -0.198, "val_sharpe": 1.026, "test_mdd": 25.8},
-    {"algorithm": "sac", "strategy": "balanced", "seed": 456, "test_sharpe": 0.040, "val_sharpe": 1.522, "test_mdd": 18.9},
-    {"algorithm": "sac", "strategy": "balanced", "seed": 789, "test_sharpe": 0.207, "val_sharpe": 1.313, "test_mdd": 23.4},
-    {"algorithm": "sac", "strategy": "balanced", "seed": 1000, "test_sharpe": -0.182, "val_sharpe": 1.178, "test_mdd": 20.8},
-    {"algorithm": "sac", "strategy": "current_focused", "seed": 42, "test_sharpe": 0.008, "val_sharpe": 1.202, "test_mdd": 20.1},
-    {"algorithm": "sac", "strategy": "current_focused", "seed": 123, "test_sharpe": 0.052, "val_sharpe": 0.982, "test_mdd": 21.1},
-    {"algorithm": "sac", "strategy": "current_focused", "seed": 456, "test_sharpe": 0.307, "val_sharpe": 1.115, "test_mdd": 19.2},
-    {"algorithm": "sac", "strategy": "current_focused", "seed": 789, "test_sharpe": 0.255, "val_sharpe": 1.608, "test_mdd": 19.4},
-    {"algorithm": "sac", "strategy": "current_focused", "seed": 1000, "test_sharpe": -0.204, "val_sharpe": 1.159, "test_mdd": 24.6},
-    {"algorithm": "sac", "strategy": "inverse_frequency", "seed": 42, "test_sharpe": 0.354, "val_sharpe": 1.339, "test_mdd": 18.7},
-    {"algorithm": "sac", "strategy": "inverse_frequency", "seed": 123, "test_sharpe": 0.147, "val_sharpe": 1.829, "test_mdd": 18.3},
-    {"algorithm": "sac", "strategy": "inverse_frequency", "seed": 456, "test_sharpe": -0.019, "val_sharpe": 0.997, "test_mdd": 21.6},
-    {"algorithm": "sac", "strategy": "inverse_frequency", "seed": 789, "test_sharpe": 0.220, "val_sharpe": 1.301, "test_mdd": 17.6},
-    {"algorithm": "sac", "strategy": "inverse_frequency", "seed": 1000, "test_sharpe": -0.032, "val_sharpe": 1.241, "test_mdd": 19.3},
-    {"algorithm": "sac", "strategy": "adaptive", "seed": 42, "test_sharpe": 0.037, "val_sharpe": 1.401, "test_mdd": 20.7},
-    {"algorithm": "sac", "strategy": "adaptive", "seed": 123, "test_sharpe": 0.398, "val_sharpe": 1.393, "test_mdd": 15.8},
-    {"algorithm": "sac", "strategy": "adaptive", "seed": 456, "test_sharpe": 0.535, "val_sharpe": 1.625, "test_mdd": 13.8},
-    {"algorithm": "sac", "strategy": "adaptive", "seed": 789, "test_sharpe": 0.193, "val_sharpe": 1.434, "test_mdd": 17.6},
-    {"algorithm": "sac", "strategy": "adaptive", "seed": 1000, "test_sharpe": -0.370, "val_sharpe": 1.265, "test_mdd": 24.8},
-    # TD3
-    {"algorithm": "td3", "strategy": "standard", "seed": 42, "test_sharpe": 0.477, "val_sharpe": 1.833, "test_mdd": 15.7},
-    {"algorithm": "td3", "strategy": "standard", "seed": 123, "test_sharpe": 0.677, "val_sharpe": 1.645, "test_mdd": 13.4},
-    {"algorithm": "td3", "strategy": "standard", "seed": 456, "test_sharpe": 0.518, "val_sharpe": 1.423, "test_mdd": 16.7},
-    {"algorithm": "td3", "strategy": "standard", "seed": 789, "test_sharpe": 0.895, "val_sharpe": 1.135, "test_mdd": 12.9},
-    {"algorithm": "td3", "strategy": "standard", "seed": 1000, "test_sharpe": 0.591, "val_sharpe": 1.647, "test_mdd": 17.5},
-    {"algorithm": "td3", "strategy": "balanced", "seed": 42, "test_sharpe": 0.499, "val_sharpe": 1.239, "test_mdd": 17.2},
-    {"algorithm": "td3", "strategy": "balanced", "seed": 123, "test_sharpe": 0.240, "val_sharpe": 1.183, "test_mdd": 18.8},
-    {"algorithm": "td3", "strategy": "balanced", "seed": 456, "test_sharpe": 0.673, "val_sharpe": 2.084, "test_mdd": 16.0},
-    {"algorithm": "td3", "strategy": "balanced", "seed": 789, "test_sharpe": 0.420, "val_sharpe": 0.962, "test_mdd": 17.4},
-    {"algorithm": "td3", "strategy": "balanced", "seed": 1000, "test_sharpe": 0.358, "val_sharpe": 1.608, "test_mdd": 23.6},
-    {"algorithm": "td3", "strategy": "current_focused", "seed": 42, "test_sharpe": 1.054, "val_sharpe": 1.335, "test_mdd": 10.8},
-    {"algorithm": "td3", "strategy": "current_focused", "seed": 123, "test_sharpe": 0.314, "val_sharpe": 2.056, "test_mdd": 23.6},
-    {"algorithm": "td3", "strategy": "current_focused", "seed": 456, "test_sharpe": 0.671, "val_sharpe": 2.287, "test_mdd": 16.6},
-    {"algorithm": "td3", "strategy": "current_focused", "seed": 789, "test_sharpe": 0.264, "val_sharpe": 1.167, "test_mdd": 20.3},
-    {"algorithm": "td3", "strategy": "current_focused", "seed": 1000, "test_sharpe": 0.798, "val_sharpe": 1.781, "test_mdd": 15.2},
-    {"algorithm": "td3", "strategy": "inverse_frequency", "seed": 42, "test_sharpe": -0.073, "val_sharpe": 1.567, "test_mdd": 23.9},
-    {"algorithm": "td3", "strategy": "inverse_frequency", "seed": 123, "test_sharpe": 0.311, "val_sharpe": 1.688, "test_mdd": 15.5},
-    {"algorithm": "td3", "strategy": "inverse_frequency", "seed": 456, "test_sharpe": 0.406, "val_sharpe": 1.531, "test_mdd": 20.8},
-    {"algorithm": "td3", "strategy": "inverse_frequency", "seed": 789, "test_sharpe": 0.343, "val_sharpe": 1.517, "test_mdd": 19.2},
-    {"algorithm": "td3", "strategy": "inverse_frequency", "seed": 1000, "test_sharpe": 0.281, "val_sharpe": 1.737, "test_mdd": 20.4},
-    {"algorithm": "td3", "strategy": "adaptive", "seed": 42, "test_sharpe": 0.823, "val_sharpe": 1.363, "test_mdd": 14.6},
-    {"algorithm": "td3", "strategy": "adaptive", "seed": 123, "test_sharpe": 1.006, "val_sharpe": 1.418, "test_mdd": 16.0},
-    {"algorithm": "td3", "strategy": "adaptive", "seed": 789, "test_sharpe": 0.743, "val_sharpe": 0.971, "test_mdd": 16.4},
-    {"algorithm": "td3", "strategy": "adaptive", "seed": 456, "test_sharpe": 0.451, "val_sharpe": 1.802, "test_mdd": 20.0},
-    {"algorithm": "td3", "strategy": "adaptive", "seed": 1000, "test_sharpe": 0.643, "val_sharpe": 2.341, "test_mdd": 16.9},
-    # Rainbow
-    {"algorithm": "rainbow", "strategy": "standard", "seed": 42, "test_sharpe": -0.001, "val_sharpe": 1.404, "test_mdd": 20.8},
-    {"algorithm": "rainbow", "strategy": "standard", "seed": 123, "test_sharpe": -0.030, "val_sharpe": 1.398, "test_mdd": 20.6},
-    {"algorithm": "rainbow", "strategy": "standard", "seed": 456, "test_sharpe": 0.071, "val_sharpe": 1.425, "test_mdd": 20.6},
-    {"algorithm": "rainbow", "strategy": "standard", "seed": 789, "test_sharpe": 0.106, "val_sharpe": 1.703, "test_mdd": 19.1},
-    {"algorithm": "rainbow", "strategy": "standard", "seed": 1000, "test_sharpe": 0.167, "val_sharpe": 1.380, "test_mdd": 19.4},
-    {"algorithm": "rainbow", "strategy": "balanced", "seed": 42, "test_sharpe": 0.097, "val_sharpe": 1.325, "test_mdd": 18.9},
-    {"algorithm": "rainbow", "strategy": "balanced", "seed": 123, "test_sharpe": 0.055, "val_sharpe": 1.346, "test_mdd": 19.4},
-    {"algorithm": "rainbow", "strategy": "balanced", "seed": 456, "test_sharpe": -0.017, "val_sharpe": 1.356, "test_mdd": 19.6},
-    {"algorithm": "rainbow", "strategy": "balanced", "seed": 789, "test_sharpe": 0.083, "val_sharpe": 1.346, "test_mdd": 20.1},
-    {"algorithm": "rainbow", "strategy": "balanced", "seed": 1000, "test_sharpe": 0.082, "val_sharpe": 1.350, "test_mdd": 17.6},
-    {"algorithm": "rainbow", "strategy": "current_focused", "seed": 42, "test_sharpe": -0.133, "val_sharpe": 1.407, "test_mdd": 19.7},
-    {"algorithm": "rainbow", "strategy": "current_focused", "seed": 123, "test_sharpe": -0.040, "val_sharpe": 1.534, "test_mdd": 21.4},
-    {"algorithm": "rainbow", "strategy": "current_focused", "seed": 456, "test_sharpe": 0.040, "val_sharpe": 1.281, "test_mdd": 19.9},
-    {"algorithm": "rainbow", "strategy": "current_focused", "seed": 789, "test_sharpe": -0.034, "val_sharpe": 1.442, "test_mdd": 20.9},
-    {"algorithm": "rainbow", "strategy": "current_focused", "seed": 1000, "test_sharpe": 0.047, "val_sharpe": 1.375, "test_mdd": 21.8},
-    {"algorithm": "rainbow", "strategy": "inverse_frequency", "seed": 42, "test_sharpe": 0.053, "val_sharpe": 1.397, "test_mdd": 19.8},
-    {"algorithm": "rainbow", "strategy": "inverse_frequency", "seed": 123, "test_sharpe": 0.222, "val_sharpe": 1.316, "test_mdd": 17.9},
-    {"algorithm": "rainbow", "strategy": "inverse_frequency", "seed": 456, "test_sharpe": 0.142, "val_sharpe": 1.333, "test_mdd": 18.0},
-    {"algorithm": "rainbow", "strategy": "inverse_frequency", "seed": 789, "test_sharpe": -0.108, "val_sharpe": 1.343, "test_mdd": 22.4},
-    {"algorithm": "rainbow", "strategy": "inverse_frequency", "seed": 1000, "test_sharpe": 0.144, "val_sharpe": 1.356, "test_mdd": 21.7},
-    {"algorithm": "rainbow", "strategy": "adaptive", "seed": 42, "test_sharpe": 0.144, "val_sharpe": 1.382, "test_mdd": 20.3},
-    {"algorithm": "rainbow", "strategy": "adaptive", "seed": 123, "test_sharpe": -0.107, "val_sharpe": 1.282, "test_mdd": 21.0},
-    {"algorithm": "rainbow", "strategy": "adaptive", "seed": 456, "test_sharpe": 0.199, "val_sharpe": 1.362, "test_mdd": 21.5},
-    {"algorithm": "rainbow", "strategy": "adaptive", "seed": 789, "test_sharpe": 0.114, "val_sharpe": 1.391, "test_mdd": 17.7},
-    {"algorithm": "rainbow", "strategy": "adaptive", "seed": 1000, "test_sharpe": -0.014, "val_sharpe": 1.468, "test_mdd": 21.8},
-]
+def load_e1_results() -> pd.DataFrame:
+    """Load E1 results from experiment directories."""
+    results = []
+    base_dir = Path("results/experiments/replay_comparison")
+
+    if not base_dir.exists():
+        print(f"Warning: {base_dir} does not exist. No results to analyze.")
+        return pd.DataFrame()
+
+    for algo_dir in base_dir.iterdir():
+        if not algo_dir.is_dir():
+            continue
+        algorithm = algo_dir.name
+
+        for strategy_dir in algo_dir.iterdir():
+            if not strategy_dir.is_dir():
+                continue
+            strategy = strategy_dir.name
+
+            for run_dir in strategy_dir.iterdir():
+                if not run_dir.is_dir():
+                    continue
+
+                config_file = run_dir / "run_config.json"
+                test_file = run_dir / "test_results.json"
+                val_file = run_dir / "val_results.json"
+
+                if not config_file.exists() or not test_file.exists():
+                    continue
+
+                try:
+                    config = json.loads(config_file.read_text(encoding="utf-8"))
+                    test_results = json.loads(test_file.read_text(encoding="utf-8"))
+
+                    val_sharpe = None
+                    if val_file.exists():
+                        val_results = json.loads(val_file.read_text(encoding="utf-8"))
+                        val_sharpe = val_results.get("sharpe_ratio")
+
+                    results.append({
+                        "algorithm": algorithm,
+                        "strategy": strategy,
+                        "seed": config.get("seed"),
+                        "test_sharpe": test_results.get("sharpe_ratio"),
+                        "val_sharpe": val_sharpe,
+                        "test_mdd": test_results.get("max_drawdown"),
+                        "test_return": test_results.get("cumulative_return"),
+                        "test_sortino": test_results.get("sortino_ratio"),
+                        "test_calmar": test_results.get("calmar_ratio"),
+                        "test_annualised_return": test_results.get("annualised_return"),
+                        "test_volatility": test_results.get("volatility"),
+                        "test_win_rate": test_results.get("win_rate"),
+                    })
+                except Exception as e:
+                    print(f"Warning: Failed to load {run_dir}: {e}")
+                    continue
+
+    return pd.DataFrame(results)
 
 # Baselines (from compute_baselines.py)
 BASELINES = {
     "SPY Buy-and-Hold": {"sharpe": -0.006, "mdd": 25.3, "return": -0.2},
-    "60/40 SPY/TLT": {"sharpe": -0.468, "mdd": 24.8, "return": -13.2},
-    "Equal-Weight": {"sharpe": -0.133, "mdd": 16.2, "return": -3.4},
-    "Risk Parity": {"sharpe": 0.003, "mdd": 7.8, "return": 0.2},
+    "60/40 SPY/TLT": {"sharpe": -0.468, "mdd": 27.6, "return": -13.2},
+    "Equal-Weight": {"sharpe": -0.133, "mdd": 20.6, "return": -2.9},
+    "Risk Parity": {"sharpe": -0.055, "mdd": 0.9, "return": -0.1},
 }
 
 
@@ -160,7 +111,15 @@ def effect_size_label(d):
 
 
 def main():
-    df = pd.DataFrame(E1_RESULTS)
+    df = load_e1_results()
+
+    if df.empty:
+        print("\nNo E1 results found. Run the experiment first:")
+        print("  python scripts/launch_experiment.py --experiments replay_comparison --workers 4")
+        return
+
+    # Convert MDD from decimal to percentage
+    df['test_mdd'] = df['test_mdd'] * 100
 
     print("=" * 80)
     print("DEEP ANALYSIS OF E1 (REPLAY_COMPARISON) EXPERIMENT")
@@ -180,7 +139,13 @@ def main():
     summary = df.groupby(['algorithm', 'strategy']).agg({
         'test_sharpe': ['mean', 'std', 'min', 'max'],
         'val_sharpe': ['mean', 'std'],
-        'test_mdd': ['mean']
+        'test_mdd': ['mean'],
+        'test_return': ['mean', 'std'],
+        'test_sortino': ['mean', 'std'],
+        'test_calmar': ['mean', 'std'],
+        'test_annualised_return': ['mean', 'std'],
+        'test_volatility': ['mean', 'std'],
+        'test_win_rate': ['mean', 'std']
     }).round(3)
 
     # Flatten column names
@@ -201,6 +166,20 @@ def main():
             row['test_sharpe_mean'], row['test_sharpe_std'],
             row['test_sharpe_min'], row['test_sharpe_max'],
             row['val_sharpe_mean'], row['val_test_gap']
+        ))
+
+    print("\n\nAdditional Metrics: Cumulative Return, Sortino, Calmar")
+    print("{:<10} {:<18} {:>12} {:>12} {:>12} {:>10}".format(
+        "Algo", "Strategy", "ReturnMean", "SortinoMean", "CalmarMean", "WinRate"
+    ))
+    print("-" * 76)
+    for _, row in summary.sort_values(['algorithm', 'test_sharpe_mean'], ascending=[True, False]).iterrows():
+        print("{:<10} {:<18} {:>+12.3f} {:>+12.3f} {:>+12.3f} {:>10.1%}".format(
+            row['algorithm'], row['strategy'],
+            row['test_return_mean'],
+            row['test_sortino_mean'],
+            row['test_calmar_mean'],
+            row['test_win_rate_mean']
         ))
 
     # =========================================================================
@@ -496,8 +475,8 @@ KEY FINDINGS:
 
 1. TD3 IS THE BEST ALGORITHM
    - Consistently positive Sharpe across ALL replay strategies
-   - Best: adaptive (mean: +0.733) and current_focused (mean: +0.620)
-   - Even standard TD3 (+0.632) outperforms all other algorithms
+   - Best: standard (mean: +0.632) and current_focused (mean: +0.620)
+   - TD3 adaptive (+0.501) dropped after Bug #10 fix (EMA decay in add())
    - Low variance, robust to seed selection
 
 2. SAC + REGIME-AWARE REPLAY IS INCOMPATIBLE
@@ -518,17 +497,17 @@ KEY FINDINGS:
    - Discrete action space may be poorly suited for continuous portfolio weights
 
 5. ALL RL AGENTS BEAT PASSIVE BASELINES
-   - Best baseline: Risk Parity (+0.003 Sharpe)
-   - TD3 adaptive: +0.733 Sharpe (244x better)
+   - Best baseline: Risk Parity (-0.055 Sharpe)
+   - TD3 standard: +0.632 Sharpe (best overall)
    - Even worst RL (Rainbow) beats SPY Buy-and-Hold
 
 6. OVERFITTING IS A CONCERN
    - All algorithms show Val > Test gap
-   - Rainbow worst (gap: 1.34), TD3 best (gap: 0.87)
+   - Rainbow worst (gap: 1.34), TD3 best (gap: 0.91)
    - Bull market validation (2020-2021) vs crash test (2022-2023)
 
 RECOMMENDATION FOR THESIS:
-- Report TD3 adaptive as best configuration
+- Report TD3 standard as best configuration (+0.632 Sharpe)
 - Discuss SAC entropy incompatibility with non-uniform sampling
 - Address overfitting via larger validation/test overlap
 - Consider TD3 current_focused as simpler alternative

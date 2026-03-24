@@ -113,6 +113,27 @@ def calculate_cumulative_return(portfolio_values: np.ndarray) -> float:
     return (portfolio_values[-1] / portfolio_values[0]) - 1
 
 
+def calculate_regime_sortino(returns: np.ndarray) -> float:
+    """Calculate annualized Sortino ratio from regime-specific returns."""
+    if len(returns) < 5:
+        return np.nan
+
+    mean_return = np.mean(returns)
+    downside_returns = returns[returns < 0]
+
+    if len(downside_returns) == 0:
+        return np.nan  # No downside, can't compute
+
+    downside_std = np.std(downside_returns, ddof=1)
+    if downside_std == 0:
+        return 0.0
+
+    annualized_return = mean_return * TRADING_DAYS_PER_YEAR
+    annualized_downside = downside_std * np.sqrt(TRADING_DAYS_PER_YEAR)
+
+    return annualized_return / annualized_downside
+
+
 def calculate_win_rate(returns: np.ndarray) -> float:
     """Calculate percentage of positive days."""
     if len(returns) == 0:
@@ -250,6 +271,7 @@ def calculate_per_regime_metrics(df: pd.DataFrame) -> pd.DataFrame:
                 pv_segments = np.array(pv_regime)
 
             sharpe = calculate_regime_sharpe(returns)
+            sortino = calculate_regime_sortino(returns)
             cum_return = np.prod(1 + returns) - 1
             volatility = np.std(returns, ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)
             mdd = calculate_regime_mdd(pv_segments) if len(pv_segments) > 1 else np.nan
@@ -263,6 +285,7 @@ def calculate_per_regime_metrics(df: pd.DataFrame) -> pd.DataFrame:
                 "regime": regime,
                 "n_days": len(returns),
                 "sharpe": sharpe,
+                "sortino": sortino,
                 "cumulative_return": cum_return,
                 "volatility": volatility,
                 "max_drawdown": mdd,
@@ -296,6 +319,7 @@ def analyze_aggregate_regime_performance(metrics_df: pd.DataFrame) -> pd.DataFra
     # Aggregate across all runs
     regime_summary = metrics_df.groupby("regime").agg({
         "sharpe": ["mean", "std", "count"],
+        "sortino": ["mean", "std"],
         "cumulative_return": ["mean", "std"],
         "max_drawdown": ["mean", "std"],
         "win_rate": ["mean", "std"],
@@ -903,8 +927,8 @@ def generate_regime_figures(metrics_df: pd.DataFrame, weights_df: pd.DataFrame,
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Regime Sharpe Heatmap (Algorithm × Strategy × Regime)
-    try:
+    # 1. Regime Sharpe Heatmap — SKIPPED (not used in report; e2_regime_heatmap.png used instead)
+    if False:  # noqa
         print("\n  Generating e2_regime_sharpe_heatmap.png...")
 
         # Aggregate to config level per regime
@@ -974,8 +998,8 @@ def generate_regime_figures(metrics_df: pd.DataFrame, weights_df: pd.DataFrame,
     except Exception as e:
         print(f"    Error: {e}")
 
-    # 3. Consistency Score Visualization
-    try:
+    # 3. Consistency Score Visualization — SKIPPED (not used in report)
+    if False:  # noqa
         print("\n  Generating e2_regime_consistency.png...")
 
         if len(consistency_df) > 0:
@@ -1017,8 +1041,8 @@ def generate_regime_figures(metrics_df: pd.DataFrame, weights_df: pd.DataFrame,
     except Exception as e:
         print(f"    Error: {e}")
 
-    # 4. Detailed Weights by Regime
-    try:
+    # 4. Detailed Weights by Regime — SKIPPED (not used in report; weights_by_regime.png used instead)
+    if False:  # noqa
         print("\n  Generating e2_weights_by_regime_detailed.png...")
 
         if len(weights_df) > 0:
@@ -1098,8 +1122,8 @@ def generate_regime_figures(metrics_df: pd.DataFrame, weights_df: pd.DataFrame,
     except Exception as e:
         print(f"    Error: {e}")
 
-    # 6. Transition Performance
-    try:
+    # 6. Transition Performance — SKIPPED (not used in report)
+    if False:  # noqa
         print("\n  Generating e2_transition_performance.png...")
 
         if len(trans_df) > 0:
