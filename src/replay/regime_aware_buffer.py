@@ -274,11 +274,11 @@ class RegimeAwareReplayBuffer:
         
         # Add to regime-specific buffer
         self._regime_buffers[regime].append(experience)
-        
-        # Update TD error tracking for adaptive sampling
-        self._td_errors_sum[regime] += abs(td_error)
-        self._td_errors_count[regime] += 1
-        
+
+        # Note: TD error tracking is handled ONLY by update_td_errors() using EMA.
+        # Previously, add() also accumulated td_errors here without EMA decay,
+        # which overwhelmed the EMA signal (Bug #9 incomplete fix).
+
         self._total_added += 1
     
     def sample(
