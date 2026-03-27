@@ -147,6 +147,11 @@ figures/
 # But DO track figures explicitly added to docs/
 !docs/figures/
 
+# Track thesis report files
+!report/
+!report/figures/
+!report/figures/*.png
+
 # -----------------------------------------------------------------------------
 # Jupyter Notebooks
 # -----------------------------------------------------------------------------
