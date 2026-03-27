@@ -245,7 +245,7 @@ def analyze_results(df: pd.DataFrame):
     print("6. COMPARISON WITH E1 BASELINES (balanced strategy)")
     print("=" * 80)
 
-    # E1 baseline values from CLAUDE.md
+    # E1 baseline values from E1 analysis results
     E1_BASELINES = {
         "ppo": {"balanced": 0.168},
         "sac": {"balanced": -0.014},

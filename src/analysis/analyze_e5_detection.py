@@ -246,7 +246,7 @@ def analyze_results(df: pd.DataFrame):
     print("6. COMPARISON WITH E1 SAC RESULTS")
     print("=" * 80)
 
-    # E1 SAC results from CLAUDE.md
+    # E1 SAC results for comparison
     E1_SAC = {
         "standard": 0.458,
         "balanced": -0.014,

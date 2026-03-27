@@ -192,7 +192,7 @@ def analyze_results(df: pd.DataFrame):
     print("4. COMPARISON WITH E1 (500k timesteps baseline)")
     print("=" * 80)
 
-    # E1 results from CLAUDE.md
+    # E1 results (500k timesteps baseline)
     E1_RESULTS = {
         "td3": {
             "standard": 0.632,

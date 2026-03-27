@@ -35,7 +35,7 @@ USAGE:
 >>> detector = UnifiedRegimeDetector(method='rule_based')
 >>> current_regime = detector.detect_current(price_data)
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 

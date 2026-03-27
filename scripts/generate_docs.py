@@ -388,7 +388,6 @@ def build(pdf: DocPDF):
         "|   +-- validation/{ticker}.csv\n"
         "|   +-- testing/{ticker}.csv\n"
         "+-- requirements.txt\n"
-        "+-- CLAUDE.md\n"
     )
 
     pdf.subsection("Complete File Inventory")
@@ -798,7 +797,6 @@ def build(pdf: DocPDF):
         "# Extends observation from 98 dims to 101 dims\n"
         "original_obs  = [95 market features, 5 portfolio weights, 1 port. value]  # 101\n"
         "augmented_obs = [original_obs..., bull?, bear?, sideways?]                # 104\n\n"
-        "# Wait -- actually the CLAUDE.md says 98 original -> 101 with regime\n"
         "# The wrapper appends [is_bull, is_bear, is_sideways] one-hot\n\n"
         "class RegimeObservationWrapper(gym.ObservationWrapper):\n"
         "    def __init__(self, env, detector, price_data):\n"

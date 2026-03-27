@@ -231,7 +231,7 @@ def analyze_results(df: pd.DataFrame):
     print("6. COMPARISON TO E1 TD3 RESULTS (500k baseline)")
     print("=" * 80)
 
-    # E1 TD3 results (from CLAUDE.md)
+    # E1 TD3 results (500k baseline)
     E1_TD3 = {
         "adaptive": {"mean": 0.733, "std": 0.206},
         "standard": {"mean": 0.632, "std": 0.166},

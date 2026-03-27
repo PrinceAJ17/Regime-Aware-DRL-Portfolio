@@ -43,7 +43,7 @@ USAGE:
 >>> # Sample with intelligent strategy
 >>> batch = buffer.sample(batch_size=64)
 
-Author: [Your Name]
+Author: Prince Alexander John
 Date: February 2026
 """
 
