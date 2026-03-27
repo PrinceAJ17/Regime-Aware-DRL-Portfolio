@@ -547,7 +547,7 @@ This appendix collects all experimental figures. Figures referenced in the main 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/e2_regime_heatmap.png}
-    \caption{Mean Sharpe ratio by algorithm and market regime (E2, aggregated across all strategies and seeds). TD3 dominates bear markets (+0.931 mean) while all algorithms profit in bull markets (+1.564 aggregate) and struggle in sideways conditions ($-1.286$ aggregate). The colour intensity reveals TD3's unique ability to extract positive returns from bear-market dynamics.}
+    \caption{Annualized Sharpe ratio by algorithm, strategy, and market regime (E2, mean across seeds and episodes). TD3 dominates bear markets (+0.931 algorithm mean) while all algorithms profit in bull markets (+1.564 aggregate) and struggle in sideways conditions ($-1.286$ aggregate). TD3 current-focused achieves the highest bear regime Sharpe (+1.07). SAC standard performs well in bear markets (+0.77) but all non-standard SAC strategies collapse.}
     \label{fig:app-regime-heatmap}
 \end{figure}
 

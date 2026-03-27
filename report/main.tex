@@ -214,7 +214,7 @@ We decomposed E1 results by market regime (Figure~\ref{fig:regime-heatmap}). Age
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.82\textwidth]{figures/e2_regime_heatmap.png}
-    \caption{Mean test Sharpe by algorithm and market regime (E2). TD3 dominates bear markets; all algorithms struggle in sideways conditions. SAC's poor performance in bear and sideways regimes reflects its sensitivity to non-uniform state distributions.}
+    \caption{Annualized Sharpe ratio by algorithm, strategy, and market regime (E2). TD3 dominates bear markets ($+0.92$ standard, $+1.07$ current-focused); all algorithms struggle in sideways conditions. SAC's sharp decline in bear and sideways regimes with non-standard replay reflects its sensitivity to distribution shifts.}
     \label{fig:regime-heatmap}
 \end{figure}
 
