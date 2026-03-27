@@ -14,9 +14,7 @@ changing what the agent remembers, not what it sees. We evaluate four RL
 algorithms (PPO, SAC, TD3, Rainbow DQN) across five replay strategies on a
 five-asset portfolio (SPY, QQQ, TLT, GLD, BIL) during the 2022--2023 bear
 market. The best configuration, TD3 with standard replay, achieves a test Sharpe
-ratio of +0.632 compared to SPY buy-and-hold at -0.006. This repository
-accompanies a BSc Computer Science final year thesis at the University of
-Birmingham.
+ratio of +0.632 compared to SPY buy-and-hold at -0.006. 
 
 ## Key Results
 
@@ -329,9 +327,6 @@ Bugs #10 and #11 were fixed on March 22, 2026, and all affected experiments
 </details>
 
 ## Citation and Academic Context
-
-This project accompanies a BSc Computer Science final year thesis at the
-University of Birmingham (2025/26 academic year).
 
 **Key references:**
 
