@@ -141,7 +141,6 @@ figures/
 *.png
 *.jpg
 *.jpeg
-*.pdf
 *.svg
 
 # But DO track figures explicitly added to docs/
