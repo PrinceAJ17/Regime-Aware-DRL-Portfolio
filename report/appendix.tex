@@ -42,7 +42,15 @@
 \section{Experimental Configuration}
 \label{app:config}
 
-This appendix provides complete hyperparameter specifications for all algorithms tested in our experiments. All experiments were conducted on a system with an NVIDIA RTX 5090 Laptop GPU (23.9GB VRAM), using Python 3.12.10, PyTorch 2.10.0 with CUDA 12.8, and Stable Baselines3 for algorithm implementations.
+This appendix provides complete hyperparameter specifications for all algorithms tested in our experiments. All experiments were conducted on a system with an NVIDIA RTX 5090 Laptop GPU (23.9GB VRAM), using the following software stack:
+
+\begin{itemize}
+    \item \textbf{Core RL:} Python 3.12.10, PyTorch 2.10.0 (CUDA 12.8), Stable Baselines3, Gymnasium
+    \item \textbf{Data processing:} pandas, NumPy, yfinance (market data retrieval)
+    \item \textbf{Regime detection:} hmmlearn (Gaussian HMM), scikit-learn (preprocessing and clustering utilities)
+    \item \textbf{Statistical analysis:} SciPy (Welch's $t$-tests, bootstrap confidence intervals)
+    \item \textbf{Visualisation:} Matplotlib, seaborn
+\end{itemize}
 
 \subsection{TD3 Hyperparameters}
 
@@ -306,7 +314,7 @@ TD3 only, with regime label noise at 0\%, 10\%, 20\%, and 30\%.
 \caption{E3 results: TD3 with varying regime detection noise levels (3 seeds per config).}
 \label{tab:e3-full}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}clccccccc@{}}
+\begin{tabular}{@{}clcccccc@{}}
 \toprule
 \textbf{Noise} & \textbf{Strategy} & \textbf{Sharpe} & \textbf{$\pm$ Std} & \textbf{Sortino} & \textbf{Ret. (\%)} & \textbf{Val Sharpe} & \textbf{Gap} \\
 \midrule
@@ -337,7 +345,7 @@ TD3 only, with regime label noise at 0\%, 10\%, 20\%, and 30\%.
 \caption{E4 feature ablation (20 runs: PPO and SAC, 5 seeds each) and E5 detection method comparison (12 runs: SAC, 3 seeds each).}
 \label{tab:e4e5}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}lllccccccc@{}}
+\begin{tabular}{@{}lllcccccc@{}}
 \toprule
 \textbf{Exp} & \textbf{Config 1} & \textbf{Config 2} & \textbf{Sharpe} & \textbf{$\pm$ Std} & \textbf{Sortino} & \textbf{Ret. (\%)} & \textbf{MDD (\%)} & \textbf{Gap} \\
 \midrule
@@ -364,7 +372,7 @@ E5 & Rule-based & balanced & +0.001 & 0.079 & +0.005 & +0.0 & 21.8 & 1.234 \\
 \caption{E6 sample efficiency (30 runs: TD3 and SAC at 1M timesteps, 5 seeds) and E7 timestep ablation (30 runs: TD3 only, 3 seeds).}
 \label{tab:e6e7}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}llcccccccc@{}}
+\begin{tabular}{@{}llccccccc@{}}
 \toprule
 \textbf{Exp} & \textbf{Config} & \textbf{Strategy} & \textbf{Sharpe} & \textbf{$\pm$ Std} & \textbf{Sortino} & \textbf{Ret. (\%)} & \textbf{Val Sharpe} & \textbf{Gap} \\
 \midrule
@@ -396,7 +404,7 @@ E7 & 500k & standard & +0.649 & 0.175 & +0.989 & +21.3 & 1.528 & 0.879 \\
 \section{Statistical Analysis Details}
 \label{app:stats}
 
-This appendix provides the complete statistical analysis supporting the results in Section~\ref{sec:results}.
+This appendix provides the complete statistical analysis supporting the results in Section~5 of the main report.
 
 \textbf{Methodology.} All comparisons use Welch's $t$-test (unequal variances assumed) with each random seed treated as an independent observation ($n = 5$ per group for E1). We apply Bonferroni correction for multiple comparisons: with 16 pairwise tests in E1 (4 algorithms $\times$ 4 non-standard strategies vs standard), the corrected significance threshold is $\alpha = 0.05 / 16 = 0.003125$. Effect sizes are reported as Cohen's $d$, interpreted as: negligible ($< 0.2$), small ($0.2$--$0.5$), medium ($0.5$--$0.8$), and large ($> 0.8$).
 
