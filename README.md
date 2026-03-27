@@ -341,6 +341,6 @@ Bugs #10 and #11 were fixed on March 22, 2026, and all affected experiments
 
 **Student ID:** pxx276
 **Supervisor:** Dr Tao Chen
-**Programme:** Computer Science
+**Programme:** M.Eng Computer Science & Software Engineering
 **Institution:** University of Birmingham
 **Academic Year:** 2025/26
