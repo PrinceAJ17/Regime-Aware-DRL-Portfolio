@@ -37,14 +37,16 @@ ratio of +0.632 compared to SPY buy-and-hold at -0.006.
 | Equal-Weight | -0.133 | -2.9% | 20.6% |
 | Risk Parity | -0.055 | -0.1% | 0.9% |
 
-All trained RL agents outperform all passive baselines on the test period.
+All five top configurations, and every TD3 configuration, outperform all passive baselines on the test
+period. Not every configuration does: Rainbow adaptive (-0.007), Rainbow current_focused (-0.024) and
+SAC balanced (-0.014) fall below SPY buy-and-hold (see Appendix C, Table 7).
 
 ### Key Findings
 
 1. **TD3 standard is the best overall configuration** (+0.632 Sharpe, beating SPY by +0.64)
-2. **TD3 is the bear market champion** (+1.33 regime Sharpe in bear markets, statistically significant at p < 0.0001)
+2. **TD3 is the bear market champion** (mean bear-regime Sharpe +0.931; significantly above PPO, SAC and Rainbow, p < 0.001, Cohen's d 1.33 to 2.93)
 3. **SAC and regime-aware replay are incompatible** --- non-uniform sampling biases SAC's entropy estimates
-4. **All RL agents beat passive baselines** in the 2022--2023 bear market test period
+4. **Every TD3 configuration beats all passive baselines** in the 2022--2023 test period (three weaker Rainbow and SAC configurations do not)
 5. **400k training timesteps is optimal** (E7: best test Sharpe +0.815, lowest val-test gap 0.607)
 6. **Reduced features reduce overfitting** (E4: smaller val-test gap without hurting performance)
 7. **Detection method does not matter** (E5: HMM and rule-based produce equivalent results with standard replay)
