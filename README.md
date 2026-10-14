@@ -12,9 +12,17 @@ prior work by Nixon Raj (2025), which augments agent *observations* with regime
 information, our approach modifies the replay buffer's *sampling strategy* ---
 changing what the agent remembers, not what it sees. We evaluate four RL
 algorithms (PPO, SAC, TD3, Rainbow DQN) across five replay strategies on a
-five-asset portfolio (SPY, QQQ, TLT, GLD, BIL) during the 2022--2023 bear
-market. The best configuration, TD3 with standard replay, achieves a test Sharpe
-ratio of +0.632 compared to SPY buy-and-hold at -0.006. 
+five-asset portfolio (SPY, QQQ, TLT, GLD, BIL) over the 2022--2023 test period,
+which spans a rate-hiking bear market and a partial recovery. The best
+configuration, TD3 with standard replay, achieves a test Sharpe ratio of +0.632
+compared to SPY buy-and-hold at -0.006. The central finding is that replay
+strategy effects are algorithm-dependent: TD3 tolerates regime-aware replay,
+while SAC collapses under it because non-uniform sampling biases its entropy
+estimates.
+
+The full write-up is in [`report/Report.pdf`](report/Report.pdf), with complete
+results, statistical tests, hyperparameters and bug documentation in
+[`report/Appendix.pdf`](report/Appendix.pdf).
 
 ## Key Results
 
@@ -99,15 +107,19 @@ configs/
 ├── training_config.yaml     # Algorithm hyperparameters (PPO, SAC, TD3, Rainbow)
 └── experiment_config.yaml   # Experiment definitions and hypotheses
 
-results/
+report/
+├── Report.pdf               # Project report
+├── Appendix.pdf             # Technical appendix (Appendices A-H)
+└── figures/                 # The 15 figures used in the report
+
+results/                     # Created when experiments run (not committed)
 ├── experiments/             # Raw experiment outputs (manifest + per-run results)
-├── figures/                 # 15 generated plots for the thesis
+├── figures/                 # Generated plots
 ├── tables/                  # Statistical test CSVs and regime analysis
 ├── baselines.json           # Passive baseline metrics
 └── e*_analysis_summary.csv  # Per-experiment summary tables
 
-tests/
-└── test_e2e.py              # End-to-end integration test (70 assertions)
+test_e2e.py                  # End-to-end integration test (data -> features -> env -> regime -> buffer -> agent -> metrics)
 ```
 
 The novel contribution resides in `src/replay/regime_aware_buffer.py`.
@@ -119,12 +131,13 @@ The novel contribution resides in `src/replay/regime_aware_buffer.py`.
 | **standard** | Uniform random sampling (no regime awareness) | Baseline |
 | **balanced** | Equal samples drawn from each regime | Regime-aware |
 | **current_focused** | 60% from current regime, 40% shared among others | Regime-aware |
-| **inverse_frequency** | Oversample rare regimes (e.g., bear markets) proportionally | Regime-aware |
-| **adaptive** | Weight sampling by per-regime TD errors with EMA decay | Novel contribution |
+| **inverse_frequency** | Sample each regime in inverse proportion to its buffer size, oversampling rare regimes (e.g., bear markets) | Regime-aware |
+| **adaptive** | Sample each regime in proportion to its mean absolute TD error, tracked with an EMA (alpha = 0.99) | Regime-aware |
 
-Standard replay serves as the control. The adaptive strategy, which uses
-exponential moving average-decayed TD errors to prioritise regimes where the
-agent is learning most, is the primary novel contribution.
+Standard replay serves as the control. The core novel component is the
+`RegimeAwareReplayBuffer`, which partitions experiences into three sub-buffers
+(bull, bear, sideways) of equal capacity; the four regime-aware strategies
+control how many transitions are drawn from each.
 
 ## Algorithms
 
@@ -133,7 +146,7 @@ agent is learning most, is the primary novel contribution.
 | **PPO** | On-policy | SB3 `PPO` | Regime features added to observations via wrapper |
 | **SAC** | Off-policy | SB3 `SAC` | Regime-aware replay buffer sampling |
 | **TD3** | Off-policy | SB3 `TD3` | Regime-aware replay buffer sampling |
-| **Rainbow DQN** | Off-policy | SB3 `DQN` | Regime-aware replay buffer sampling + discrete action wrapper |
+| **Rainbow DQN** | Off-policy | Custom (PyTorch) | Regime-aware replay combined with prioritised replay, discrete action space |
 
 PPO, as an on-policy algorithm, does not use a replay buffer. Regime information
 is instead provided through a `RegimeObservationWrapper` that appends regime
@@ -172,8 +185,8 @@ sets, compared in E4.
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd pxx276
+git clone https://github.com/PrinceAJ17/Regime-Aware-DRL-Portfolio.git
+cd Regime-Aware-DRL-Portfolio
 
 # Create and activate a virtual environment
 python -m venv DRL
@@ -255,6 +268,9 @@ strategy comparison bar charts in `results/figures/`.
 
 ## Results Structure
 
+The `results/` folder is written by the experiment and analysis scripts and is
+not committed. The figures used in the report are in `report/figures/`.
+
 ```
 results/
 ├── baselines.json                  # Passive baseline metrics
@@ -333,11 +349,14 @@ Bugs #10 and #11 were fixed on March 22, 2026, and all affected experiments
 **Key references:**
 
 - Nixon Raj (2025). *Adaptive and Regime-Aware RL for Portfolio Optimization*. arXiv:2509.14385.
-- Pippas, Turkay & Phelps (2025). *Enhancing Portfolio Management with DRL and HMM*.
-- Raffin et al. (2021). *Stable-Baselines3: Reliable RL Implementations*. JMLR.
-- Jiang, Xu & Liang (2017). *Deep Reinforcement Learning for Portfolio Management*.
-- Hamilton (1989). *A New Approach to the Economic Analysis of Nonstationary Time Series and the Business Cycle*.
+- Pippas, Ludvig & Turkay (2025). *The Evolution of Reinforcement Learning in Quantitative Finance: A Survey*. ACM Computing Surveys 57(11).
+- Fujimoto, van Hoof & Meger (2018). *Addressing Function Approximation Error in Actor-Critic Methods* (TD3). ICML.
+- Haarnoja, Zhou, Abbeel & Levine (2018). *Soft Actor-Critic*. ICML.
+- Raffin et al. (2021). *Stable-Baselines3: Reliable Reinforcement Learning Implementations*. JMLR.
+- Hamilton (1989). *A New Approach to the Economic Analysis of Nonstationary Time Series and the Business Cycle*. Econometrica.
 - Schaul et al. (2016). *Prioritized Experience Replay*. ICLR.
+
+The full reference list is in [`report/Report.pdf`](report/Report.pdf).
 
 ## Author
 
